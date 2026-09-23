@@ -36,12 +36,12 @@
   .spacer { flex: 1; }
   .main { display: grid; grid-template-columns: minmax(0, 1fr) minmax(360px, 520px); min-height: 0; }
   .chat { display: grid; grid-template-rows: 1fr auto; min-height: 0; border-right: 1px solid var(--border); }
-  .messages { overflow-y: auto; padding: 20px 20px 8px; display: flex; flex-direction: column; gap: 14px; }
+  .messages { overflow-y: auto; min-height: 0; padding: 20px 20px 8px; display: flex; flex-direction: column; gap: 14px; }
   .empty { margin: auto; text-align: center; color: var(--muted); max-width: 420px; }
   .empty h2 { color: var(--text); font-size: 17px; margin-bottom: 6px; }
   .examples { display: flex; flex-wrap: wrap; gap: 6px; justify-content: center; margin-top: 14px; }
   .examples button { border: 1px solid var(--border); background: var(--panel); border-radius: 999px; padding: 4px 10px; cursor: pointer; font-size: 13px; }
-  .msg { max-width: 820px; }
+  .msg { max-width: 820px; flex-shrink: 0; } /* keep full height; the list scrolls instead of squashing messages */
   .msg.user { align-self: flex-end; background: var(--user); color: var(--user-text); padding: 9px 13px; border-radius: 14px 14px 4px 14px; white-space: pre-wrap; word-wrap: break-word; }
   .msg.assistant { align-self: flex-start; width: 100%; background: var(--panel); border: 1px solid var(--border); border-radius: 12px; box-shadow: var(--shadow); overflow: hidden; cursor: pointer; }
   .msg.assistant.selected { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
@@ -299,7 +299,10 @@ async function send() {
       const body = await res.json().catch(() => ({}));
       throw new Error(body.error?.message ?? `HTTP ${res.status}`);
     }
+    const list = $('#messages');
     await readEvents(res.body, (event, data) => {
+      // Follow the stream only if the reader is already at the bottom.
+      const atBottom = list.scrollHeight - list.scrollTop - list.clientHeight < 80;
       if (event === 'decision') { turn.decision = data.decision; turn.why = data.why; }
       else if (event === 'thinking') turn.thinking = true;
       else if (event === 'delta') turn.answer += data.text;
@@ -307,7 +310,7 @@ async function send() {
       else if (event === 'error') turn.error = data.message + (data.status === 402 ? '\n\nOpenRouter needs credits for real answers. Turn on "Route only" to keep testing routing for free.' : '');
       renderTurn(turn);
       if (state.selected === index && event !== 'delta') renderInspector();
-      $('#messages').scrollTop = $('#messages').scrollHeight;
+      if (atBottom) list.scrollTop = list.scrollHeight;
     });
   } catch (err) {
     turn.error = err.message; renderTurn(turn); renderInspector();
