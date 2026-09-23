@@ -1,0 +1,26 @@
+{
+  "source": {
+    "name": "modelgrep.com leaderboard (Artificial Analysis Intelligence Index + coding index, tokens/sec)",
+    "url": "https://modelgrep.com/leaderboard",
+    "fetchedAt": "2026-09-23",
+    "trust": 0.5,
+    "note": "Third-party priors only. Pricing, context, modalities and effort levels come from OpenRouter via `mrouter sync`. Replace these priors with our own evals."
+  },
+  "models": [
+    { "id": "anthropic/claude-opus-5.5", "intelligence": 57.6, "coding": null, "tps": 144, "ttftMs": 1500 },
+    { "id": "anthropic/claude-fable-5.1", "intelligence": 53.4, "coding": 81.6, "tps": 56, "ttftMs": 2000 },
+    { "id": "openai/gpt-6-astra", "intelligence": 52.7, "coding": 76.9, "tps": 68, "ttftMs": 2000 },
+    { "id": "openai/gpt-6-sol", "intelligence": 47.5, "coding": null, "tps": 65, "ttftMs": 1200 },
+    { "id": "x-ai/grok-4.7", "intelligence": 46.4, "coding": null, "tps": 61, "ttftMs": 1500 },
+    { "id": "qwen/qwen3.8-max-0902", "intelligence": 45.4, "coding": 76.2, "tps": 30, "ttftMs": 1500 },
+    { "id": "z-ai/glm-5.3", "intelligence": 44.8, "coding": 74.8, "tps": 139, "ttftMs": 1200 },
+    { "id": "moonshotai/kimi-k3", "intelligence": 43.6, "coding": 76.2, "tps": 63, "ttftMs": 1500 },
+    { "id": "z-ai/glm-5.3-flash", "intelligence": 41.8, "coding": 71.5, "tps": 90, "ttftMs": 800 },
+    { "id": "google/gemini-3.8-flash", "intelligence": 40.9, "coding": 76.3, "tps": 155, "ttftMs": 700 },
+    { "id": "deepseek/deepseek-v4.1-flash", "intelligence": 39.5, "coding": null, "tps": 184, "ttftMs": 700 },
+    { "id": "anthropic/claude-sonnet-5", "intelligence": 38.2, "coding": 71.5, "tps": 76, "ttftMs": 1000 },
+    { "id": "openai/gpt-6-luna", "intelligence": 37.3, "coding": null, "tps": 123, "ttftMs": 600 },
+    { "id": "deepseek/deepseek-v4-pro-0813", "intelligence": 36.0, "coding": 68.8, "tps": 117, "ttftMs": 900 },
+    { "id": "google/gemini-3.5-flash-lite", "intelligence": 22.2, "coding": 49.3, "tps": 92, "ttftMs": 500 }
+  ]
+}

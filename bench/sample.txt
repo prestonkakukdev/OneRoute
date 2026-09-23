@@ -1,0 +1,10 @@
+hey! how is it going?
+Write a short polite email to my landlord asking to fix the leaking kitchen sink this week.
+My React component re-renders infinitely after I added useEffect(() => { setItems(items.filter(Boolean)) }, [items]). Why and how do I fix it?
+Plan and implement a migration of our 400-file Express.js monorepo from CommonJS to ESM, including Jest config, dynamic requires and __dirname usages.
+Prove that there are infinitely many primes p such that p ≡ 3 (mod 4).
+Go to my company CRM in the browser, find every lead from last week with no follow-up, and draft a follow-up task for each.
+What did Anthropic announce this week and how does it compare to GPT-6 Astra on coding benchmarks?
+Write a 1,500-word literary short story about a lighthouse keeper who finds a letter from her future self.
+Extract every person, company and date from this paragraph as strict JSON: "On March 3, Dana Ruiz of Helix Corp met Omar Said from Brightline."
+Summarize the key risks in this 10-K filing section and flag anything unusual for an investor.

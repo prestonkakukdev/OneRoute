@@ -1,0 +1,12 @@
+{
+  "_comment": "Artificial Analysis slug (or base slug without the effort suffix) -> OpenRouter model id, for names the automatic matcher cannot pair. Only add pairs you have verified are the same model.",
+  "overrides": {
+    "gemma-4-31b": "google/gemma-4-31b-it",
+    "gemma-4-26b-a4b": "google/gemma-4-26b-a4b-it",
+    "nvidia-nemotron-3-ultra-550b-a55b": "nvidia/nemotron-3-ultra-550b-a55b",
+    "nvidia-nemotron-3-super-120b-a12b": "nvidia/nemotron-3-super-120b-a12b",
+    "mimo-v2-5-0424": "xiaomi/mimo-v2.5",
+    "qwen3-6-max": "qwen/qwen3.6-max-preview",
+    "grok-build-0-1-06-16": "x-ai/grok-build-0.1"
+  }
+}

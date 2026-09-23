@@ -1,0 +1,246 @@
+import type { Store } from '../db/store.js';
+import { chatCompletion, ConfigError } from '../providers/openrouter.js';
+import { config } from '../config.js';
+import type { Effort } from '../taxonomy.js';
+import { estimateTokens } from '../classifier/state.js';
+import type { ChatMessage, ChatRequest, ModelRecord, RequestFacts, RouteDecision } from '../types.js';
+import { SseLineParser } from './sse.js';
+
+interface Usage {
+  prompt_tokens?: number;
+  completion_tokens?: number;
+  cost?: number;
+  completion_tokens_details?: { reasoning_tokens?: number };
+}
+
+export interface Attempt {
+  modelId: string;
+  effort: Effort;
+  status: number | 'network_error';
+  error?: string;
+}
+
+export interface ExecutionResult {
+  response: Response;
+  servedModel: string;
+  servedEffort: Effort;
+  attempts: Attempt[];
+}
+
+// Auth / billing failures are account-wide; trying another model would fail the same way.
+const NO_FALLBACK = new Set([401, 402, 403]);
+
+export function reasoningParam(effort: Effort): Record<string, unknown> | undefined {
+  if (effort === 'default') return undefined;
+  if (effort === 'none') return { enabled: false };
+  return { effort };
+}
+
+export function buildUpstreamBody(
+  req: ChatRequest,
+  modelId: string,
+  effort: Effort,
+  model: ModelRecord | undefined,
+  decision: Pick<RouteDecision, 'useWeb' | 'facts'>,
+): Record<string, unknown> {
+  const { router: _router, ...rest } = req;
+  const body: Record<string, unknown> = { ...rest, model: modelId, usage: { include: true } };
+  const reasoning = reasoningParam(effort);
+  if (reasoning) body.reasoning = reasoning;
+  else delete body.reasoning;
+  if (decision.useWeb) {
+    const plugins = Array.isArray(req.plugins) ? (req.plugins as unknown[]) : [];
+    body.plugins = [...plugins, { id: 'web' }];
+  }
+  if (model?.provider === 'anthropic') addAnthropicCacheBreakpoints(body, decision.facts);
+  return body;
+}
+
+const CACHE_MIN_TOKENS = 1024;
+
+// Anthropic caches only at explicit breakpoints (other providers cache prefixes automatically).
+// Verified live: a breakpoint on a long system prompt is reused across different questions, and the
+// top-level automatic breakpoint is reused as a conversation grows.
+function addAnthropicCacheBreakpoints(body: Record<string, unknown>, facts: RequestFacts): void {
+  const messages = body.messages as ChatMessage[];
+  const i = messages.findIndex((m) => m.role === 'system');
+  const system = messages[i];
+  if (system && typeof system.content === 'string' && estimateTokens(system.content) >= CACHE_MIN_TOKENS) {
+    const copy = [...messages];
+    copy[i] = { ...system, content: [{ type: 'text', text: system.content, cache_control: { type: 'ephemeral' } }] };
+    body.messages = copy;
+  }
+  if (facts.prefixTokens >= CACHE_MIN_TOKENS && !('cache_control' in body)) body.cache_control = { type: 'ephemeral' };
+}
+
+function fallbackChain(decision: RouteDecision): { modelId: string; effort: Effort }[] {
+  const chain = [{ modelId: decision.modelId, effort: decision.effort }];
+  for (const c of decision.candidates) {
+    if (chain.length > config.maxFallbacks) break;
+    if (!chain.some((x) => x.modelId === c.modelId)) chain.push({ modelId: c.modelId, effort: c.effort });
+  }
+  return chain;
+}
+
+function routerHeaders(decision: RouteDecision, modelId: string, effort: Effort): Record<string, string> {
+  return {
+    'x-router-request-id': decision.requestId,
+    'x-router-model': modelId,
+    'x-router-effort': effort,
+    'x-router-task': decision.task.taskType.value,
+  };
+}
+
+export function routerMetadata(decision: RouteDecision, modelId: string, effort: Effort, attempts: Attempt[]) {
+  const chosen = decision.candidates[0];
+  return {
+    request_id: decision.requestId,
+    model: modelId,
+    effort,
+    mode: decision.mode,
+    task_type: decision.task.taskType.value,
+    task_confidence: Number(decision.task.taskType.confidence.toFixed(3)),
+    difficulty: decision.task.difficulty.value,
+    classifier: decision.task.source,
+    web_search: decision.useWeb,
+    escalated: decision.escalation !== null,
+    est_success: chosen ? Number(chosen.pSuccess.toFixed(3)) : undefined,
+    est_cost_usd: chosen ? Number(chosen.estCostUsd.toFixed(6)) : undefined,
+    fallbacks: attempts.length - 1,
+    route_ms: Math.round(decision.routeMs),
+  };
+}
+
+export class Executor {
+  constructor(
+    private readonly store: Store,
+    private readonly llm: typeof chatCompletion = chatCompletion,
+  ) {}
+
+  async execute(req: ChatRequest, decision: RouteDecision, signal?: AbortSignal): Promise<ExecutionResult> {
+    const models = new Map(this.store.listModels({ includeDisabled: true }).map((m) => [m.id, m]));
+    const attempts: Attempt[] = [];
+    let lastResponse: Response | undefined;
+
+    for (const { modelId, effort } of fallbackChain(decision)) {
+      const started = performance.now();
+      let res: Response;
+      try {
+        res = await this.llm(buildUpstreamBody(req, modelId, effort, models.get(modelId), decision), signal);
+      } catch (err) {
+        if (signal?.aborted || err instanceof ConfigError) throw err;
+        attempts.push({ modelId, effort, status: 'network_error', error: (err as Error).message });
+        continue;
+      }
+      if (!res.ok) {
+        const text = await res.text();
+        attempts.push({ modelId, effort, status: res.status, error: text.slice(0, 500) });
+        lastResponse = new Response(text, { status: res.status, headers: { 'content-type': 'application/json' } });
+        this.store.recordOutcome({ requestId: decision.requestId, modelId, effort, status: 'error', error: `${res.status}: ${text.slice(0, 300)}` });
+        if (NO_FALLBACK.has(res.status)) break;
+        continue;
+      }
+      attempts.push({ modelId, effort, status: res.status });
+      const headers = routerHeaders(decision, modelId, effort);
+      const finish = (usage: Usage | undefined, ttftMs: number | undefined, error?: string) =>
+        this.finish(decision, modelId, effort, usage, ttftMs, performance.now() - started, models.get(modelId), attempts.length - 1, error);
+
+      if (req.stream && res.body) {
+        return {
+          response: new Response(res.body.pipeThrough(tap(finish, started)), {
+            status: 200,
+            headers: { 'content-type': res.headers.get('content-type') ?? 'text/event-stream', 'cache-control': 'no-cache', ...headers },
+          }),
+          servedModel: modelId,
+          servedEffort: effort,
+          attempts,
+        };
+      }
+      const json = (await res.json()) as { usage?: Usage; [k: string]: unknown };
+      finish(json.usage, undefined);
+      json.router = routerMetadata(decision, modelId, effort, attempts);
+      return {
+        response: new Response(JSON.stringify(json), { status: 200, headers: { 'content-type': 'application/json', ...headers } }),
+        servedModel: modelId,
+        servedEffort: effort,
+        attempts,
+      };
+    }
+
+    const summary = attempts.map((a) => `${a.modelId}: ${a.status}${a.error ? ` (${a.error.slice(0, 120)})` : ''}`).join('; ');
+    return {
+      response:
+        lastResponse ??
+        Response.json({ error: { message: `All models failed (${summary})`, type: 'upstream_error' } }, { status: 502 }),
+      servedModel: decision.modelId,
+      servedEffort: decision.effort,
+      attempts,
+    };
+  }
+
+  private finish(
+    decision: RouteDecision,
+    modelId: string,
+    effort: Effort,
+    usage: Usage | undefined,
+    ttftMs: number | undefined,
+    latencyMs: number,
+    model: ModelRecord | undefined,
+    fallbacks: number,
+    error?: string,
+  ): void {
+    this.store.recordOutcome({
+      requestId: decision.requestId,
+      modelId,
+      effort,
+      status: error ? 'error' : 'ok',
+      error,
+      fallbacks,
+      latencyMs,
+      ttftMs,
+      promptTokens: usage?.prompt_tokens,
+      completionTokens: usage?.completion_tokens,
+      reasoningTokens: usage?.completion_tokens_details?.reasoning_tokens,
+      costUsd: usage?.cost,
+    });
+    if (error) return;
+    // Learn real speed. Without a measured first-token time, assume the current estimate.
+    const generationMs = latencyMs - (ttftMs ?? model?.ttftMs ?? 0);
+    const tps = usage?.completion_tokens && generationMs > 200 ? usage.completion_tokens / (generationMs / 1000) : undefined;
+    this.store.updatePerformance(modelId, ttftMs, tps);
+    if (decision.sessionId) this.store.setSession(decision.sessionId, modelId, effort);
+  }
+}
+
+// Passes the upstream SSE bytes through untouched while watching for first-token time and usage.
+// A client that disconnects mid-stream is still recorded (as an interrupted request).
+function tap(onDone: (usage: Usage | undefined, ttftMs: number | undefined, error?: string) => void, started: number) {
+  const parser = new SseLineParser();
+  let usage: Usage | undefined;
+  let ttftMs: number | undefined;
+  const inspect = (events: unknown[]) => {
+    for (const e of events) {
+      const ev = e as { usage?: Usage; choices?: { delta?: Record<string, unknown> }[] };
+      if (ev.usage) usage = ev.usage;
+      const delta = ev.choices?.[0]?.delta;
+      if (ttftMs === undefined && delta && (delta.content || delta.reasoning || delta.tool_calls)) {
+        ttftMs = performance.now() - started;
+      }
+    }
+  };
+  // `cancel` is part of the Streams spec (supported by Node 22+) but missing from TypeScript's lib types.
+  const transformer: Transformer<Uint8Array, Uint8Array> & { cancel(reason: unknown): void } = {
+    transform(chunk, controller) {
+      inspect(parser.push(chunk));
+      controller.enqueue(chunk);
+    },
+    flush() {
+      inspect(parser.flush());
+      onDone(usage, ttftMs);
+    },
+    cancel(reason) {
+      onDone(usage, ttftMs, `stream cancelled: ${String(reason ?? 'client disconnected')}`);
+    },
+  };
+  return new TransformStream<Uint8Array, Uint8Array>(transformer);
+}

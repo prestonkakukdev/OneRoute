@@ -1,0 +1,96 @@
+{
+  "_comment": "Benchmark results published by model vendors, transcribed from their release pages. Vendor-reported (not independent): the pipeline weights them below independent sources. Values are as published (percent unless 'unit' says otherwise). 'effort': the effort the vendor states; 'top' = the model's highest effort (vendors report the best score at any effort unless noted). Rows with the same model+benchmark from different vendors are kept separately and averaged.",
+  "reports": [
+    {
+      "source": "anthropic.com/claude-opus-5-5",
+      "url": "https://www.anthropic.com/claude-opus-5-5",
+      "reporter": "anthropic",
+      "published": "2026-09-22",
+      "models": ["anthropic/claude-opus-5.5", "anthropic/claude-fable-5.1", "anthropic/claude-opus-5", "openai/gpt-6-astra", "openai/gpt-5.6-sol"],
+      "defaultEffort": "top",
+      "notes": "Opus 5.5 at max effort unless noted; Terminal-Bench 4.0: Opus 5.5 at xhigh, GPT-6 Astra at high.",
+      "rows": {
+        "terminalbench_4": [66.4, 55.8, 52.3, 57.9, 37.3],
+        "frontiercode_main": [54.4, 50.3, 48.0, 53.3, 47.5],
+        "cursorbench_4": [57.8, 51.8, 46.6, null, 41.7],
+        "gdpval_aa_v2_1_elo": [1846, 1735, 1708, 1542, 1588],
+        "automationbench": [40.0, 31.4, 26.9, 41.4, 28.8],
+        "hle_tools": [67.7, 65.6, 63.6, 57.2, null],
+        "terminalbench_science": [58.7, 52.6, 29.0, 64.6, 22.4],
+        "osworld_2": [81.8, 80.7, 74.0, null, null],
+        "chartography": [89.0, 88.4, 83.4, null, null]
+      },
+      "effortOverrides": {
+        "terminalbench_4": { "anthropic/claude-opus-5.5": "xhigh", "openai/gpt-6-astra": "high" }
+      }
+    },
+    {
+      "source": "openai.com/index/gpt-6-astra",
+      "url": "https://openai.com/index/gpt-6-astra/",
+      "reporter": "openai",
+      "published": "2026-09-04",
+      "models": ["openai/gpt-6-astra", "openai/gpt-5.6-sol", "anthropic/claude-fable-5.1", "anthropic/claude-fable-5", "anthropic/claude-opus-5", "google/gemini-3.8-flash"],
+      "defaultEffort": "top",
+      "notes": "Evaluation scores are the maximum at any effort.",
+      "rows": {
+        "agents_last_exam": [59.3, 53.6, null, 48.7, 55.5, null],
+        "osworld_2": [72.6, 65.7, null, null, 70.2, null],
+        "screenspot_pro": [92.7, 76.9, null, 87.3, null, null],
+        "automationbench": [41.4, 18.1, 31.4, 17.4, 26.9, null],
+        "browsecomp": [91.5, 90.4, null, 87.4, 90.8, null],
+        "terminalbench_4": [57.9, 37.3, 55.8, 44.5, 52.6, 19.1],
+        "deepswe_1_1": [74.1, 72.7, 67.4, 69.9, 73.7, 73.8],
+        "frontiercode_extended": [64.5, 60.6, 63.6, 64.9, 63.6, 56.3],
+        "frontiercode_main": [53.3, 47.5, 50.9, 53.5, 53.4, 43.6],
+        "terminalbench_science": [64.6, 22.4, 52.6, 21.4, 30.0, null],
+        "frontiermath_t4": [97.6, 83.0, 87.8, 90.2, 73.2, null],
+        "gpqa_diamond": [96.0, 94.6, 93.7, 92.6, 93.7, 95.3],
+        "hle_tools": [57.2, null, 65.0, 63.8, 63.6, null],
+        "healthbench_pro": [63.4, 60.5, 58.1, 60.9, 56.4, 52.1],
+        "mrcr_8needle_256k_512k": [100.0, 91.5, null, null, null, null],
+        "mrcr_8needle_512k_1m": [96.3, 73.8, null, null, null, null],
+        "arc_agi_2": [95.0, 92.5, 90.0, 89.2, 90.4, null],
+        "benchcad": [95.9, 83.3, 84.3, 67.5, 82.1, null]
+      }
+    },
+    {
+      "source": "openai.com/index/introducing-gpt-6-sol-and-luna",
+      "url": "https://openai.com/index/introducing-gpt-6-sol-and-luna/",
+      "reporter": "openai",
+      "published": "2026-09-22",
+      "notes": "Effort-specific results quoted in the text.",
+      "points": [
+        { "model": "openai/gpt-6-sol", "effort": "xhigh", "benchmark": "automationbench", "value": 33.2 },
+        { "model": "openai/gpt-6-astra", "effort": "low", "benchmark": "automationbench", "value": 30.3 },
+        { "model": "anthropic/claude-opus-5", "effort": "max", "benchmark": "automationbench", "value": 26.9 },
+        { "model": "openai/gpt-6-sol", "effort": "max", "benchmark": "agents_last_exam", "value": 56.4 },
+        { "model": "openai/gpt-6-sol", "effort": "max", "benchmark": "deepswe_1_1", "value": 68.8 },
+        { "model": "openai/gpt-6-luna", "effort": "max", "benchmark": "deepswe_1_1", "value": 66.6 },
+        { "model": "anthropic/claude-fable-5", "effort": "xhigh", "benchmark": "deepswe_1_1", "value": 69.9 },
+        { "model": "openai/gpt-6-sol", "effort": "xhigh", "benchmark": "osworld_2", "value": 60.5 },
+        { "model": "anthropic/claude-opus-5", "effort": "medium", "benchmark": "osworld_2", "value": 60.3 }
+      ]
+    },
+    {
+      "source": "deepmind.google/models/model-cards/gemini-3-8-flash",
+      "url": "https://deepmind.google/models/model-cards/gemini-3-8-flash/",
+      "reporter": "google",
+      "published": "2026-09-02",
+      "models": ["google/gemini-3.8-flash", "google/gemini-3.7-flash", "anthropic/claude-opus-5", "anthropic/claude-sonnet-5", "openai/gpt-5.6-sol", "openai/gpt-5.6-terra"],
+      "defaultEffort": "top",
+      "rows": {
+        "deepswe_1_1": [73.7, 65.3, 74.0, 53.8, 72.7, 69.6],
+        "gdpval_aa_v2_elo": [1545, 1482, 1824, 1584, 1710, 1528],
+        "vals_finance_agent_2": [61.4, 59.0, 58.6, 53.9, 53.8, 54.4],
+        "harvey_legal_agent": [10.0, 8.8, 6.7, 5.0, 2.5, 0.8],
+        "terminalbench_2_1_vendor": [89.4, 85.8, 89.1, 80.4, 88.8, 87.4],
+        "terminalbench_4": [19.1, 11.2, 51.8, 12.4, 37.3, 23.6],
+        "gdp_pdf": [35.0, 34.0, 37.0, 28.0, 40.0, 29.0],
+        "charxiv_reasoning": [86.2, 84.5, 83.7, 70.1, 85.8, 85.9],
+        "lvbench": [87.8, 85.4, 75.4, 68.5, 82.1, 78.9],
+        "hle_verified": [54.9, 53.6, 54.4, 31.0, 54.5, 51.1],
+        "osworld_2": [59.0, 50.6, 75.4, 42.6, 62.6, 50.2]
+      }
+    }
+  ]
+}
