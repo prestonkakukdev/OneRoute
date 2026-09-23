@@ -126,6 +126,9 @@ export interface Candidate {
   estCostUsd: number;
   estLatencyS: number;
   utility: number;
+  skill?: number; // effective skill for this request (0-100)
+  // Score components in USD: utility = value + quality - cost - latency - preference
+  breakdown?: { value: number; quality: number; cost: number; latency: number; preference: number };
 }
 
 export interface Escalation {
@@ -148,6 +151,8 @@ export interface RouteDecision {
   sessionId?: string;
   stickyModel?: string;
   preferences?: Preferences;
+  needs?: Partial<Record<Capability, number>>; // requirement weights for the most likely task type
+  rejected?: Record<string, string>; // model -> reason it failed a hard requirement
   routeMs: number;
 }
 

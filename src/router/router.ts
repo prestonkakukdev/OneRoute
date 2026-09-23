@@ -7,6 +7,7 @@ import type { Store } from '../db/store.js';
 import { chatCompletion } from '../providers/openrouter.js';
 import type { Candidate, ChatRequest, Escalation, Preferences, RouteDecision, RoutePrefs, TaskProfile } from '../types.js';
 import { conservativePick, escalateWithLlm, escalationReasons } from './escalate.js';
+import { requirementWeights } from './estimate.js';
 import { rankCandidates, successValue } from './optimizer.js';
 
 export interface RouterDeps {
@@ -103,7 +104,7 @@ export class Router {
     const sticky = prefs.sessionId ? this.store.getSession(prefs.sessionId) : undefined;
     // Auto web search only when the client brings no tools of its own (an agent can search itself).
     const useWeb = prefs.web === 'on' || (prefs.web === 'auto' && task.needsWeb >= 0.6 && !facts.toolsPresent);
-    const { ranked } = rankCandidates({
+    const { ranked, rejected } = rankCandidates({
       models,
       task,
       facts,
@@ -148,6 +149,8 @@ export class Router {
       sessionId: prefs.sessionId,
       stickyModel: sticky?.modelId,
       preferences: prefs.preferences,
+      needs: requirementWeights(task.taskType.value, task, facts),
+      rejected,
       routeMs: performance.now() - started,
     };
     this.store.recordDecision(decision, config.storePrompts ? text : '');

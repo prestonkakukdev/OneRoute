@@ -35,6 +35,18 @@ mrouter profiles    # optional: LLM-written model profiles (needs OpenRouter cre
 
 Without `npm link`, use `npm run dev -- <command>` or `node dist/cli/index.js <command>`.
 
+## Testing interface
+
+```bash
+mrouter ui        # opens http://127.0.0.1:8787/ in your browser
+```
+
+Chat on the left. Click any answer to inspect it on the right: Jev's reading (task type, difficulty,
+reasoning depth, answer length, signals, capability importance), the capability weights the router looked for,
+a plain-English "why this model", the top candidates with a score breakdown (value and quality vs cost, time and
+preference penalties), models ruled out, and the actual cost and time once the answer finishes. Rate answers with 👍/👎
+(this feeds the learning loop). Tick **Route only** to test routing without calling a model.
+
 ## Use it
 
 ```bash

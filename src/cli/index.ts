@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { createInterface } from 'node:readline/promises';
@@ -239,9 +240,26 @@ program
     const app = createApp(store, new Router(store));
     serve({ fetch: app.fetch, port: opts.port, hostname: opts.host }, (info) => {
       console.log(`Model Router gateway on http://${opts.host}:${info.port}/v1  (POST /chat/completions, /route, /feedback; GET /models)`);
+      console.log(`Testing interface on http://${opts.host === '0.0.0.0' ? '127.0.0.1' : opts.host}:${info.port}/`);
       if (!config.gatewayKey && opts.host !== '127.0.0.1' && opts.host !== 'localhost') {
         console.log(red('Warning: ROUTER_API_KEY is not set and the gateway is reachable from the network.'));
       }
+    });
+  });
+
+program
+  .command('ui')
+  .description('Start the gateway and open the testing interface in your browser')
+  .option('-p, --port <port>', 'port', parseNumber, config.port)
+  .action((opts: { port: number }) => {
+    warnMissingKeys();
+    const store = new Store(config.dbPath);
+    const app = createApp(store, new Router(store));
+    serve({ fetch: app.fetch, port: opts.port, hostname: '127.0.0.1' }, (info) => {
+      const url = `http://127.0.0.1:${info.port}/`;
+      console.log(`Testing interface on ${url}  (Ctrl+C to stop)`);
+      const opener = process.platform === 'darwin' ? 'open' : process.platform === 'win32' ? 'start' : 'xdg-open';
+      spawn(opener, [url], { stdio: 'ignore', detached: true, shell: process.platform === 'win32' }).on('error', () => {});
     });
   });
 

@@ -67,3 +67,74 @@ export function describePreferences(p: Preferences): string {
   if (p.minQuality) parts.push(`min quality ${p.minQuality}`);
   return parts.join(', ');
 }
+
+const short = (id: string) => id.split('/')[1] ?? id;
+const usd = (v: number) => (Math.abs(v) < 0.01 ? `$${v.toFixed(4)}` : `$${v.toFixed(3)}`);
+
+// Plain-English account of a decision: what Jev saw, what was ruled out, and why the winner beat the
+// runner-up (the score component that differed most).
+export function explainWhy(d: RouteDecision): string[] {
+  const t = d.task;
+  const out: string[] = [];
+  const needs = Object.entries(d.needs ?? {})
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 3)
+    .map(([k]) => k.replace(/_/g, ' '));
+  out.push(
+    `${t.source === 'jev' ? 'Jev' : 'The keyword fallback'} read this as ${t.taskType.value.replace(/_/g, ' ')} (${pct(t.taskType.confidence)} confident), difficulty ${t.difficulty.value}/4, needing mainly ${needs.join(', ') || 'general ability'}.`,
+  );
+  const signals = [
+    t.latencySensitive >= 0.6 ? 'the user likely wants a fast reply' : '',
+    t.highStakes >= 0.6 ? 'mistakes would be costly' : '',
+    d.useWeb ? 'it needs live web information, so web search is on' : '',
+    (t.underspecified ?? 0) >= 0.8 ? 'it is too vague to act on, so it is treated as a request for clarification' : '',
+  ].filter(Boolean);
+  if (signals.length) out.push(`Signals: ${signals.join('; ')}.`);
+  const rejected = Object.entries(d.rejected ?? {});
+  if (rejected.length) {
+    const reasons = [...new Set(rejected.map(([, r]) => r))].join(', ');
+    out.push(`${rejected.length} model(s) ruled out before scoring (${reasons}).`);
+  }
+  const [win] = d.candidates;
+  if (!win) return out;
+  out.push(
+    `Picked ${short(win.modelId)} at ${win.effort} effort: ~${pct(win.pSuccess)} chance of a good answer, ~${usd(win.estCostUsd)}, ~${win.estLatencyS.toFixed(1)}s.`,
+  );
+  const rival = d.candidates.find((c) => c.modelId !== win.modelId);
+  if (rival?.breakdown && win.breakdown) {
+    const diffs = (['value', 'quality', 'cost', 'latency', 'preference'] as const).map((k) => {
+      const sign = k === 'value' || k === 'quality' ? 1 : -1;
+      return { k, delta: sign * (win.breakdown![k] - rival.breakdown![k]) };
+    });
+    const helped = diffs.filter((x) => x.delta > 0).sort((a, b) => b.delta - a.delta)[0];
+    const hurt = diffs.filter((x) => x.delta < 0).sort((a, b) => a.delta - b.delta)[0];
+    const label: Record<string, string> = {
+      value: 'a higher chance of success',
+      quality: 'better answer quality',
+      cost: 'lower cost',
+      latency: 'faster response',
+      preference: 'your preferences',
+    };
+    const against: Record<string, string> = {
+      value: 'a lower chance of success',
+      quality: 'slightly weaker answer quality',
+      cost: 'a higher price',
+      latency: 'a slower response',
+      preference: 'your preferences',
+    };
+    out.push(
+      `Beat ${short(rival.modelId)} (${rival.effort}; ${pct(rival.pSuccess)}, ${usd(rival.estCostUsd)}, ${rival.estLatencyS.toFixed(1)}s) mainly on ${label[helped?.k ?? 'value']}` +
+        (hurt ? `, even though ${against[hurt.k]} counted against it.` : '.'),
+    );
+  }
+  const sameModel = d.candidates.filter((c) => c.modelId === win.modelId && c.effort !== win.effort);
+  const higher = sameModel.find((c) => c.estCostUsd > win.estCostUsd);
+  if (higher) {
+    out.push(
+      `A higher effort (${higher.effort}) would raise success to ~${pct(higher.pSuccess)} for ${usd(higher.estCostUsd - win.estCostUsd)} more and ${(higher.estLatencyS - win.estLatencyS).toFixed(1)}s longer, which was not worth it here.`,
+    );
+  }
+  if (d.stickyModel) out.push(`This conversation was on ${short(d.stickyModel)}; staying on it is cheaper because its cached history can be reused.`);
+  if (d.escalation) out.push(`Escalated (${d.escalation.by}): ${d.escalation.reasons.join('; ')}. ${d.escalation.rationale ?? ''}`);
+  return out;
+}

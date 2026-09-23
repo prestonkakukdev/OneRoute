@@ -1,6 +1,8 @@
 import { timingSafeEqual } from 'node:crypto';
 import { Hono, type Context } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
+import { streamSSE } from 'hono/streaming';
+import { readFileSync } from 'node:fs';
 import { z } from 'zod';
 import { config } from '../config.js';
 import type { Store } from '../db/store.js';
@@ -10,6 +12,8 @@ import type { Router } from '../router/router.js';
 import { MODES, type Mode } from '../taxonomy.js';
 import type { ChatRequest } from '../types.js';
 import { Executor } from './execute.js';
+import { readSse } from './sse.js';
+import { explainWhy } from '../router/explain.js';
 
 const chatSchema = z
   .object({
@@ -76,7 +80,15 @@ export function createApp(store: Store, router: Router, executor = new Executor(
 
   app.get('/health', (c) => c.json({ ok: true }));
 
-  app.use('/v1/*', bodyLimit({ maxSize: MAX_BODY_BYTES, onError: (c) => openAiError(c, 413, 'Request body too large') }));
+  for (const path of ['/v1/*', '/ui/api/*']) {
+    app.use(path, bodyLimit({ maxSize: MAX_BODY_BYTES, onError: (c) => openAiError(c, 413, 'Request body too large') }));
+  }
+  app.use('/ui/api/*', async (c, next) => {
+    if (!config.gatewayKey) return next();
+    const given = c.req.header('authorization')?.replace(/^Bearer\s+/i, '') ?? '';
+    if (!keyMatches(given, config.gatewayKey)) return openAiError(c, 401, 'Invalid or missing API key', 'authentication_error');
+    return next();
+  });
   app.use('/v1/*', async (c, next) => {
     if (!config.gatewayKey) return next();
     const given = c.req.header('authorization')?.replace(/^Bearer\s+/i, '') ?? '';
@@ -161,6 +173,111 @@ export function createApp(store: Store, router: Router, executor = new Executor(
       ...store.listModels().map((m) => ({ id: m.id, object: 'model', created, owned_by: m.provider })),
     ];
     return c.json({ object: 'list', data });
+  });
+
+  // --- Testing interface -------------------------------------------------------------------------
+  app.get('/', (c) => c.html(readFileSync(new URL('../../ui/index.html', import.meta.url), 'utf8')));
+
+  app.get('/ui/api/models', (c) =>
+    c.json(
+      store.listModels().map((m) => ({
+        id: m.id,
+        provider: m.provider,
+        openWeights: m.openWeights,
+        inputPrice: m.pricing.inputPerTok * 1e6,
+        outputPrice: m.pricing.outputPerTok * 1e6,
+        efforts: m.efforts,
+        profile: m.profile,
+      })),
+    ),
+  );
+
+  const uiChatSchema = z.object({
+    messages: z.array(z.object({ role: z.enum(['system', 'user', 'assistant']), content: z.string() })).min(1),
+    mode: z.enum(MODES).optional(),
+    preferences: z
+      .object({
+        qualityWeight: z.number().min(0).max(100).optional(),
+        costWeight: z.number().min(0).max(100).optional(),
+        speedWeight: z.number().min(0).max(100).optional(),
+        openWeights: z.enum(['any', 'prefer', 'only']).optional(),
+        preferProviders: z.array(z.string()).optional(),
+        avoidProviders: z.array(z.string()).optional(),
+        minQuality: z.number().min(0).max(100).optional(),
+      })
+      .optional(),
+    web: z.enum(['auto', 'on', 'off']).optional(),
+    escalation: z.enum(['auto', 'off']).optional(),
+    sessionId: z.string().max(200).optional(),
+    dryRun: z.boolean().optional(),
+  });
+
+  // Routes the conversation, then streams: `decision` (full routing detail + plain-English reasons),
+  // `delta` (answer text), `thinking` (reasoning started), `done` (actual usage) or `error`.
+  app.post('/ui/api/chat', async (c) => {
+    const parsed = uiChatSchema.safeParse(await c.req.json().catch(() => null));
+    if (!parsed.success) return openAiError(c, 400, parsed.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; '));
+    const b = parsed.data;
+    const req: ChatRequest = { messages: b.messages, stream: true };
+    return streamSSE(c, async (sse) => {
+      const send = (event: string, data: unknown) => sse.writeSSE({ event, data: JSON.stringify(data) });
+      let decision;
+      try {
+        decision = await router.route(req, {
+          mode: b.mode,
+          preferences: b.preferences,
+          web: b.web,
+          escalation: b.escalation,
+          sessionId: b.sessionId,
+        });
+      } catch (err) {
+        await send('error', { message: (err as Error).message });
+        return;
+      }
+      await send('decision', { decision, why: explainWhy(decision) });
+      if (b.dryRun) return;
+
+      const started = performance.now();
+      try {
+        const result = await executor.execute(req, decision, c.req.raw.signal);
+        if (!result.response.ok || !result.response.body) {
+          const text = await result.response.text();
+          let message = text.slice(0, 500);
+          try {
+            message = (JSON.parse(text) as { error?: { message?: string } }).error?.message ?? message;
+          } catch {}
+          await send('error', { status: result.response.status, message, attempts: result.attempts });
+          return;
+        }
+        let ttftMs: number | undefined;
+        let usage: Record<string, unknown> | undefined;
+        let thinking = false;
+        for await (const ev of readSse(result.response.body)) {
+          const e = ev as { choices?: { delta?: { content?: string; reasoning?: string } }[]; usage?: Record<string, unknown>; error?: { message?: string } };
+          if (e.error) await send('error', { message: e.error.message ?? 'upstream error' });
+          const delta = e.choices?.[0]?.delta;
+          if (delta?.reasoning && !thinking) {
+            thinking = true;
+            await send('thinking', {});
+          }
+          if (delta?.content) {
+            ttftMs ??= performance.now() - started;
+            await send('delta', { text: delta.content });
+          }
+          if (e.usage) usage = e.usage;
+        }
+        await send('done', {
+          model: result.servedModel,
+          effort: result.servedEffort,
+          fallbacks: result.attempts.length - 1,
+          latencyMs: performance.now() - started,
+          ttftMs,
+          usage,
+        });
+      } catch (err) {
+        await send('error', { message: (err as Error).message });
+      }
+    });
   });
 
   app.onError((err, c) => {

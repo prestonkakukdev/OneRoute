@@ -90,18 +90,22 @@ export function rankCandidates(input: RankInput): { ranked: Candidate[]; rejecte
       if (prefs.maxLatencyS !== undefined && estLatencyS > prefs.maxLatencyS) continue;
       const success = expectedSuccess(model, effort, task, input.learning, needs);
       if (success.skill < pref.minQuality) continue;
+      const breakdown = {
+        value: success.valueWeighted * value,
+        quality: (premium * success.skill) / 100,
+        cost: pref.costWeight * estCostUsd,
+        latency: estLatencyS * latencyPrice,
+        preference: preferencePenalty(model, prefs, requestValue),
+      };
       ranked.push({
         modelId: model.id,
         effort,
         pSuccess: success.p,
         estCostUsd,
         estLatencyS,
-        utility:
-          success.valueWeighted * value +
-          (premium * success.skill) / 100 -
-          pref.costWeight * estCostUsd -
-          estLatencyS * latencyPrice -
-          preferencePenalty(model, prefs, requestValue),
+        skill: success.skill,
+        breakdown,
+        utility: breakdown.value + breakdown.quality - breakdown.cost - breakdown.latency - breakdown.preference,
       });
     }
   }
