@@ -50,6 +50,9 @@
   .msg-body { padding: 10px 13px; white-space: pre-wrap; word-wrap: break-word; }
   .msg-body pre { background: var(--code); border: 1px solid var(--border); padding: 10px; border-radius: 8px; overflow-x: auto; white-space: pre; }
   .msg-body code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12.5px; }
+  .sources { margin-top: 10px; font-size: 12.5px; display: flex; flex-wrap: wrap; gap: 4px 10px; white-space: normal; }
+  .sources a { color: var(--accent); text-decoration: none; }
+  .sources a:hover { text-decoration: underline; }
   .pill { display: inline-flex; align-items: center; gap: 4px; padding: 1px 8px; border-radius: 999px; font-size: 12px; background: var(--panel-2); border: 1px solid var(--border); color: var(--muted); white-space: nowrap; }
   .pill.accent { background: var(--accent-soft); color: var(--accent); border-color: transparent; }
   .pill.good { background: var(--good-soft); color: var(--good); border-color: transparent; }
@@ -315,7 +318,10 @@ async function send() {
   } catch (err) {
     turn.error = err.message; renderTurn(turn); renderInspector();
   }
-  if (turn.answer) state.history.push({ role: 'assistant', content: turn.answer });
+  // Keep web sources in the history so later turns (possibly other models) can see where facts came from.
+  const sources = turn.done?.sources ?? [];
+  const sourcesText = sources.length ? `\n\nSources (web search):\n${sources.map((s) => `- ${s.title}: ${s.url}`).join('\n')}` : '';
+  if (turn.answer) state.history.push({ role: 'assistant', content: turn.answer + sourcesText });
   else state.history.pop(); // keep history consistent when nothing was answered
   state.busy = false; $('#send').disabled = false; input.focus();
 }
@@ -353,7 +359,12 @@ function renderTurn(t) {
   let body;
   if (t.error) body = `<div class="error">${esc(t.error)}</div>`;
   else if (t.dryRun && d) body = '<span class="muted">Route only: no model was called.</span>';
-  else if (t.answer) body = renderMarkdown(t.answer);
+  else if (t.answer) {
+    const src = t.done?.sources ?? [];
+    body = renderMarkdown(t.answer) + (src.length
+      ? `<div class="sources"><span class="muted">Sources:</span> ${src.map((s, i) => `<a href="${esc(s.url)}" target="_blank" rel="noopener">${i + 1}. ${esc(s.title)}</a>`).join(' ')}</div>`
+      : '');
+  }
   else if (d) body = `<span class="muted dots">${t.thinking ? 'Thinking' : 'Waiting for ' + esc(short(d.modelId))}</span>`;
   else body = '<span class="muted dots">Asking Jev</span>';
   t.el.innerHTML = `<div class="msg-head">${head}</div><div class="msg-body">${body}</div>`;

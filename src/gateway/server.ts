@@ -252,8 +252,16 @@ export function createApp(store: Store, router: Router, executor = new Executor(
         let ttftMs: number | undefined;
         let usage: Record<string, unknown> | undefined;
         let thinking = false;
+        const sources = new Map<string, string>(); // url -> title, from web-search citations
         for await (const ev of readSse(result.response.body)) {
-          const e = ev as { choices?: { delta?: { content?: string; reasoning?: string } }[]; usage?: Record<string, unknown>; error?: { message?: string } };
+          const e = ev as {
+            choices?: { delta?: { content?: string; reasoning?: string; annotations?: { type?: string; url_citation?: { url?: string; title?: string } }[] } }[];
+            usage?: Record<string, unknown>;
+            error?: { message?: string };
+          };
+          for (const a of e.choices?.[0]?.delta?.annotations ?? []) {
+            if (a.type === 'url_citation' && a.url_citation?.url) sources.set(a.url_citation.url, a.url_citation.title ?? a.url_citation.url);
+          }
           if (e.error) await send('error', { message: e.error.message ?? 'upstream error' });
           const delta = e.choices?.[0]?.delta;
           if (delta?.reasoning && !thinking) {
@@ -273,6 +281,7 @@ export function createApp(store: Store, router: Router, executor = new Executor(
           latencyMs: performance.now() - started,
           ttftMs,
           usage,
+          sources: [...sources].map(([url, title]) => ({ url, title })),
         });
       } catch (err) {
         await send('error', { message: (err as Error).message });

@@ -46,3 +46,19 @@ describe('upstream request', () => {
     expect(body.usage).toEqual({ include: true });
   });
 });
+
+describe('multi-model continuity', () => {
+  it('adds a fixed note once the conversation has earlier assistant turns, after any system prompt', async () => {
+    const { CONTINUITY_NOTE } = await import('../src/gateway/execute.js');
+    const first = buildUpstreamBody({ messages: [{ role: 'user', content: 'hi' }] }, 'x/y', 'low', undefined, { useWeb: false, facts: { prefixTokens: 0 } as never });
+    expect((first.messages as { content: string }[]).some((m) => m.content === CONTINUITY_NOTE)).toBe(false);
+    const later = buildUpstreamBody(
+      { messages: [{ role: 'system', content: 'be nice' }, { role: 'user', content: 'hi' }, { role: 'assistant', content: 'hello' }, { role: 'user', content: 'more' }] },
+      'x/y', 'low', undefined, { useWeb: false, facts: { prefixTokens: 0 } as never },
+    );
+    const msgs = later.messages as { role: string; content: string }[];
+    expect(msgs[0]!.content).toBe('be nice');
+    expect(msgs[1]).toEqual({ role: 'system', content: CONTINUITY_NOTE });
+    expect(msgs).toHaveLength(5);
+  });
+});

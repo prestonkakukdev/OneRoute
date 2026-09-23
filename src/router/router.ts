@@ -102,8 +102,12 @@ export class Router {
     // 2. Deterministic optimization over the capability database.
     const models = this.store.listModels();
     const sticky = prefs.sessionId ? this.store.getSession(prefs.sessionId) : undefined;
-    // Auto web search only when the client brings no tools of its own (an agent can search itself).
-    const useWeb = prefs.web === 'on' || (prefs.web === 'auto' && task.needsWeb >= 0.6 && !facts.toolsPresent);
+    // Auto web search when Jev says the answer needs current information, or the request is clearly a research
+    // task (e.g. "research the effects of X" benefits from current sources even if the topic is not news).
+    // Skipped when the client brings its own tools: an agent can search itself.
+    const wantsWeb =
+      task.needsWeb >= 0.6 || (task.capabilities.web_research ?? 0) >= 0.5 || (task.taskType.probabilities.research ?? 0) >= 0.6;
+    const useWeb = prefs.web === 'on' || (prefs.web === 'auto' && wantsWeb && !facts.toolsPresent);
     const { ranked, rejected } = rankCandidates({
       models,
       task,
