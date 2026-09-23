@@ -391,6 +391,18 @@ function levels(title, dist, names) {
   return `<div class="row" style="--n:${n}"><span class="muted">${esc(title)}</span>${cells}</div>`;
 }
 
+// The search tool is a separate switch from the "web research" capability weight: make it explicit.
+function webLine(d) {
+  const t = d.task, why = [];
+  if (t.needsWeb >= 0.6) why.push(`needs current info ${pct(t.needsWeb)}`);
+  if ((t.capabilities.web_research ?? 0) >= 0.5) why.push(`web research ${pct(t.capabilities.web_research)} important`);
+  if ((t.taskType.probabilities.research ?? 0) >= 0.6) why.push('research task');
+  const pref = state.prefs.web && state.prefs.web !== 'auto' ? ` (your setting: ${state.prefs.web})` : '';
+  if (d.useWeb) return `<span class="pill good">Web search ON</span> <span class="muted">${esc(why.join(', ') || 'forced on')}${pref}</span>`;
+  const reason = d.facts.toolsPresent ? 'the client supplied its own tools' : `needs current info only ${pct(t.needsWeb)}`;
+  return `<span class="pill">Web search OFF</span> <span class="muted">${esc(pref ? 'your setting' : reason)}</span>`;
+}
+
 function signal(name, p, invert) {
   const cls = p >= 0.6 ? (invert ? 'good' : 'warn') : 'pill';
   return `<span class="pill ${p >= 0.6 ? cls : ''}">${esc(name)} ${pct(p)}</span>`;
@@ -428,6 +440,7 @@ function renderInspector() {
     <div class="card pick">
       <h3>Chosen model <span>${esc(d.mode)}${t.dryRun ? ' · route only' : ''}</span></h3>
       <div class="name">${esc(d.modelId)} <span class="pill accent">${esc(d.effort)} effort</span> ${served}</div>
+      <div class="signals">${webLine(d)}</div>
       <div class="stats">
         <div class="stat"><div class="k">Est. success</div><div class="v">${pct(win.pSuccess)}</div></div>
         <div class="stat"><div class="k">Est. cost</div><div class="v">${usd(win.estCostUsd)}</div></div>
