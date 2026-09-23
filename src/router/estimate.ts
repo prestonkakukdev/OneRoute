@@ -7,6 +7,8 @@ import {
   MAX_REASONING_GAIN_POINTS,
   OUTPUT_TOKENS_BY_LEVEL,
   REASONING_TOKENS,
+  RELIABILITY_PRIOR_REQUESTS,
+  RELIABILITY_PRIOR_UPTIME,
   SUCCESS_CURVE_WIDTH,
   TASK_CAPABILITY_MIX,
   type Capability,
@@ -159,14 +161,18 @@ export function expectedSuccess(
   task: TaskProfile,
   learning: LearningOptions,
   needs: RequirementsByType,
-): { p: number; valueWeighted: number } {
+): { p: number; valueWeighted: number; skill: number } {
   const depth = depthFactor(task);
   let total = 0;
   let valued = 0;
   let weight = 0;
+  let skillSum = 0;
+  let typeWeight = 0;
   for (const [type, typeNeeds] of Object.entries(needs) as [TaskType, [Capability, number][]][]) {
     const pType = task.taskType.probabilities[type];
     const skill = requestSkill(model, effort, typeNeeds, depth);
+    skillSum += pType * skill;
+    typeWeight += pType;
     for (const [level, pLevel] of Object.entries(task.difficulty.probabilities)) {
       if (pLevel < MIN_LEVEL_PROBABILITY) continue;
       const lvl = Number(level);
@@ -176,7 +182,8 @@ export function expectedSuccess(
       weight += pType * pLevel;
     }
   }
-  return weight > 0 ? { p: total / weight, valueWeighted: valued / weight } : { p: 0, valueWeighted: 0 };
+  const skill = typeWeight > 0 ? skillSum / typeWeight : 0;
+  return weight > 0 ? { p: total / weight, valueWeighted: valued / weight, skill } : { p: 0, valueWeighted: 0, skill };
 }
 
 // Relative amount of reasoning a task consumes, by expected difficulty (Hard = 1).
@@ -270,6 +277,13 @@ const PREFILL_TOKENS_PER_S = 10_000;
 // A web search round-trip before the model starts answering.
 const WEB_SEARCH_S = 3;
 
+// Uptime from live stats, blended with a modest prior until the model has a real track record.
+export function reliability(model: ModelRecord): number {
+  const s = model.providerStats;
+  const n = s?.requests ?? 0;
+  return ((s?.uptime ?? RELIABILITY_PRIOR_UPTIME) * n + RELIABILITY_PRIOR_UPTIME * RELIABILITY_PRIOR_REQUESTS) / (n + RELIABILITY_PRIOR_REQUESTS);
+}
+
 // Unreliable providers cost time in retries and fallbacks; each point of downtime adds ~2% latency.
 export function estimateLatencySeconds(
   model: ModelRecord,
@@ -283,5 +297,5 @@ export function estimateLatencySeconds(
     tokens.input / PREFILL_TOKENS_PER_S +
     (opts.useWeb ? WEB_SEARCH_S : 0) +
     (tokens.output + tokens.reasoning) / Math.max(m.tps, 1);
-  return base * (1 + 2 * (1 - (model.providerStats?.uptime ?? 1)));
+  return base * (1 + 2 * (1 - reliability(model)));
 }

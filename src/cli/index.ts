@@ -26,7 +26,7 @@ import { explainDecision, summaryLine } from '../router/explain.js';
 import { RoutingError } from '../router/optimizer.js';
 import { Router } from '../router/router.js';
 import { CAPABILITY_KEYS, MODES, type Dimension, type Effort, type Mode } from '../taxonomy.js';
-import type { ChatMessage, ChatRequest, ModelRecord, RouteDecision } from '../types.js';
+import type { ChatMessage, ChatRequest, ModelRecord, Preferences, RouteDecision } from '../types.js';
 
 const dim = (s: string) => styleText('dim', s);
 const red = (s: string) => styleText('red', s);
@@ -34,6 +34,28 @@ const red = (s: string) => styleText('red', s);
 function parseMode(value: string): Mode {
   if (!MODES.includes(value as Mode)) throw new InvalidArgumentError(`mode must be one of ${MODES.join(', ')}`);
   return value as Mode;
+}
+
+// --pref quality=3 --pref open=prefer --pref prefer=anthropic,google --pref avoid=x-ai --pref min=50
+const PREF_KEYS: Record<string, keyof Preferences> = {
+  quality: 'qualityWeight',
+  cost: 'costWeight',
+  speed: 'speedWeight',
+  open: 'openWeights',
+  prefer: 'preferProviders',
+  avoid: 'avoidProviders',
+  min: 'minQuality',
+};
+function parsePref(value: string, acc: Partial<Preferences> = {}): Partial<Preferences> {
+  const [k, v] = value.split('=');
+  const key = PREF_KEYS[k ?? ''];
+  if (!key || v === undefined) throw new InvalidArgumentError(`use key=value with key one of ${Object.keys(PREF_KEYS).join(', ')}`);
+  if (key === 'openWeights') {
+    if (!['any', 'prefer', 'only'].includes(v)) throw new InvalidArgumentError('open must be any, prefer or only');
+    return { ...acc, openWeights: v as Preferences['openWeights'] };
+  }
+  if (key === 'preferProviders' || key === 'avoidProviders') return { ...acc, [key]: v.split(',').filter(Boolean) };
+  return { ...acc, [key]: parseNumber(v) };
 }
 
 function parseNumber(value: string): number {
@@ -57,7 +79,8 @@ program
   .description('Chat in the terminal; every turn is routed to the best model')
   .option('-m, --mode <mode>', 'cheap | balanced | best', parseMode, config.defaultMode)
   .option('-s, --system <prompt>', 'system prompt')
-  .action(async (opts: { mode: Mode; system?: string }) => {
+  .option('--pref <key=value>', 'preference (repeatable): quality=N cost=N speed=N open=any|prefer|only prefer=a,b avoid=a,b min=N', parsePref, {})
+  .action(async (opts: { mode: Mode; system?: string; pref: Partial<Preferences> }) => {
     warnMissingKeys();
     const store = new Store(config.dbPath);
     const router = new Router(store);
@@ -99,7 +122,7 @@ program
       messages.push({ role: 'user', content: input });
       const req: ChatRequest = { messages, stream: true };
       try {
-        last = await router.route(req, { mode, sessionId });
+        last = await router.route(req, { mode, sessionId, preferences: opts.pref });
       } catch (err) {
         console.log(red((err as Error).message));
         messages.pop();
@@ -162,7 +185,8 @@ program
   .option('-m, --mode <mode>', 'cheap | balanced | best', parseMode, config.defaultMode)
   .option('--no-escalation', 'never escalate')
   .option('--json', 'print the raw decision')
-  .action(async (words: string[], opts: { file?: string; mode: Mode; escalation: boolean; json?: boolean }) => {
+  .option('--pref <key=value>', 'preference (repeatable): quality=N cost=N speed=N open=any|prefer|only prefer=a,b avoid=a,b min=N', parsePref, {})
+  .action(async (words: string[], opts: { file?: string; mode: Mode; escalation: boolean; json?: boolean; pref: Partial<Preferences> }) => {
     const prompt = opts.file ? readFileSync(opts.file, 'utf8') : words.join(' ');
     if (!prompt.trim()) throw new InvalidArgumentError('provide a prompt or --file');
     warnMissingKeys();
@@ -170,7 +194,7 @@ program
     try {
       const decision = await new Router(store).route(
         { messages: [{ role: 'user', content: prompt }] },
-        { mode: opts.mode, escalation: opts.escalation ? 'auto' : 'off' },
+        { mode: opts.mode, escalation: opts.escalation ? 'auto' : 'off', preferences: opts.pref },
       );
       console.log(opts.json ? JSON.stringify(decision, null, 2) : explainDecision(decision));
     } finally {
@@ -184,12 +208,13 @@ program
   .option('--modes <modes...>', 'modes to compare', ['cheap', 'balanced', 'best'])
   .option('--out <file>', 'results JSONL', `bench/results/${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')}.jsonl`)
   .option('--quiet', 'only print flagged routes and the summary')
-  .action(async (file: string, opts: { modes: string[]; out: string; quiet?: boolean }) => {
+  .option('--pref <key=value>', 'preference (repeatable): quality=N cost=N speed=N open=any|prefer|only prefer=a,b avoid=a,b min=N', parsePref, {})
+  .action(async (file: string, opts: { modes: string[]; out: string; quiet?: boolean; pref: Partial<Preferences> }) => {
     const modes = opts.modes.map(parseMode);
     warnMissingKeys();
     const store = new Store(config.dbPath);
     let lastHeader = '';
-    const rows = await runBench(store, loadCases(file), modes, (c, r) => {
+    const rows = await runBench(store, loadCases(file), modes, opts.pref, (c, r) => {
       if (opts.quiet && !r.flags.length) return;
       if (lastHeader !== c.id && (lastHeader = c.id)) console.log(`\n${c.id} [${c.cat}${c.expect ? `, expect ${c.expect}` : ''}] ${c.prompt.length > 90 ? `${c.prompt.slice(0, 87)}...` : c.prompt}`);
       const needs = Object.entries(r.needs).sort((a, b) => b[1] - a[1]).slice(0, 3).map(([k, v]) => `${k} ${v}`).join(', ');

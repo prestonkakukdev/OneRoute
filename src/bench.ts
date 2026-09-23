@@ -5,7 +5,7 @@ import type { Store } from './db/store.js';
 import { requirementWeights } from './router/estimate.js';
 import { Router } from './router/router.js';
 import type { Mode } from './taxonomy.js';
-import type { ChatRequest, ContentPart, ModelRecord, RouteDecision, TaskProfile } from './types.js';
+import type { ChatRequest, ContentPart, ModelRecord, Preferences, RouteDecision, TaskProfile } from './types.js';
 
 // One routing test case. `expect` is the tier a sensible router should land in for balanced mode;
 // `web` is whether live web search is expected.
@@ -88,6 +88,7 @@ export async function runBench(
   store: Store,
   cases: BenchCase[],
   modes: Mode[],
+  preferences: Partial<Preferences> = {},
   onRow?: (c: BenchCase, row: BenchRow) => void,
   classify: (state: unknown) => Promise<TaskProfile> = (s) => classifyWithJev(s),
 ) {
@@ -105,7 +106,7 @@ export async function runBench(
   for (const c of cases) {
     const req = toRequest(c);
     for (const mode of modes) {
-      const d = await router.route(req, { mode, escalation: 'off' });
+      const d = await router.route(req, { mode, escalation: 'off', preferences });
       const top = d.candidates[0]!;
       const needs = requirementWeights(d.task.taskType.value, d.task, d.facts);
       const bestSkill = Math.max(

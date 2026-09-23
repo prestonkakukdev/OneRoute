@@ -214,3 +214,12 @@ describe('profiles', () => {
     expect(third.generated).toEqual([m.id]);
   });
 });
+
+describe('reliability', () => {
+  it('trusts live uptime only once a model has a track record', async () => {
+    const { reliability } = await import('../src/router/estimate.js');
+    const base = { providerStats: { tps: 100, latencyS: 1, uptime: 1, providers: 1, requests: 1, measuredAt: 'now' } } as never;
+    const proven = { providerStats: { tps: 100, latencyS: 1, uptime: 0.999, providers: 5, requests: 100_000, measuredAt: 'now' } } as never;
+    expect(reliability(base)).toBeLessThan(reliability(proven)); // 1 perfect request is not proof
+  });
+});

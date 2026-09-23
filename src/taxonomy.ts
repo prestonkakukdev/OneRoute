@@ -108,11 +108,25 @@ export type Mode = (typeof MODES)[number];
 
 // What a successful answer to a Moderate task is worth (USD) and what a second of waiting costs, per mode.
 // score = P(success) * value - cost - latency_seconds * valuePerSecond
-export const MODE_WEIGHTS: Record<Mode, { valueUsd: number; latencyUsdPerSec: number }> = {
-  cheap: { valueUsd: 0.02, latencyUsdPerSec: 0.00005 },
-  balanced: { valueUsd: 0.3, latencyUsdPerSec: 0.0015 },
-  best: { valueUsd: 10, latencyUsdPerSec: 0 },
+// qualityPremiumUsd: what 100 points of skill are worth on top of pass/fail. Answers are not binary:
+// even when every model would "succeed" (a greeting), a better model gives a better answer.
+export const MODE_WEIGHTS: Record<Mode, { valueUsd: number; latencyUsdPerSec: number; qualityPremiumUsd: number }> = {
+  cheap: { valueUsd: 0.02, latencyUsdPerSec: 0.00005, qualityPremiumUsd: 0.001 },
+  balanced: { valueUsd: 0.3, latencyUsdPerSec: 0.0015, qualityPremiumUsd: 0.03 },
+  best: { valueUsd: 10, latencyUsdPerSec: 0, qualityPremiumUsd: 1 },
 };
+
+// Bigger jobs are worth more: value grows with the size of the input the user supplies
+// (x1 for a short prompt, ~x2 at 20K tokens, ~x3.5 at 300K tokens).
+export const jobSizeMultiplier = (inputTokens: number) => 1 + 0.5 * Math.log2(1 + inputTokens / 10_000);
+
+// Preference strength: a disfavoured model (closed weights under 'prefer', an avoided provider) must beat
+// a favoured one by this fraction of the request's value to still be chosen.
+export const PREFERENCE_STRENGTH = 0.15;
+
+// Live reliability needs a track record: uptime is blended with this prior as if it had this many requests.
+export const RELIABILITY_PRIOR_UPTIME = 0.97;
+export const RELIABILITY_PRIOR_REQUESTS = 1000;
 
 // Solving a hard problem is worth far more than answering a greeting, so the value of a
 // success scales with difficulty (Moderate = 1).

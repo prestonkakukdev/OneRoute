@@ -162,6 +162,8 @@ export class Store {
     this.db.exec(SCHEMA);
     const cols = (this.db.prepare('PRAGMA table_info(outcomes)').all() as Row[]).map((c) => c.name);
     if (!cols.includes('fallbacks')) this.db.exec('ALTER TABLE outcomes ADD COLUMN fallbacks INTEGER');
+    const modelCols = (this.db.prepare('PRAGMA table_info(models)').all() as Row[]).map((c) => c.name);
+    if (!modelCols.includes('open_weights')) this.db.exec('ALTER TABLE models ADD COLUMN open_weights INTEGER NOT NULL DEFAULT 0');
     const { n } = this.db.prepare('SELECT COUNT(*) AS n FROM models').get() as { n: number };
     if (n === 0) this.seed(buildSeedModels());
   }
@@ -185,10 +187,11 @@ export class Store {
     this.db
       .prepare(
         `INSERT INTO models (id, name, provider, enabled, context_length, max_output, input_modalities, supported_params,
-           pricing, efforts, reasoning_mandatory, default_effort, effort_gain, tps, ttft_ms, notes, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+           pricing, efforts, reasoning_mandatory, default_effort, effort_gain, tps, ttft_ms, notes, updated_at, open_weights)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(id) DO UPDATE SET
            name = excluded.name, provider = excluded.provider, context_length = excluded.context_length,
+           open_weights = excluded.open_weights,
            max_output = excluded.max_output, input_modalities = excluded.input_modalities,
            supported_params = excluded.supported_params, pricing = excluded.pricing, efforts = excluded.efforts,
            reasoning_mandatory = excluded.reasoning_mandatory, default_effort = excluded.default_effort,
@@ -212,6 +215,7 @@ export class Store {
         m.ttftMs,
         m.notes ?? null,
         m.updatedAt,
+        m.openWeights ? 1 : 0,
       );
   }
 
@@ -356,6 +360,7 @@ export class Store {
         id: r.id as string,
         name: r.name as string,
         provider: r.provider as string,
+        openWeights: r.open_weights === 1,
         enabled: r.enabled === 1,
         contextLength: r.context_length as number,
         maxOutput: r.max_output as number,

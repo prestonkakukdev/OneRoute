@@ -1,4 +1,4 @@
-import type { RouteDecision } from '../types.js';
+import type { Preferences, RouteDecision } from '../types.js';
 import { requirementWeights } from './estimate.js';
 
 const pct = (p: number) => `${(p * 100).toFixed(0)}%`;
@@ -30,6 +30,7 @@ export function explainDecision(d: RouteDecision): string {
   const t = d.task;
   const lines = [
     `Request ${d.requestId} · mode ${d.mode} · routed in ${Math.round(d.routeMs)}ms (classifier ${t.source}, ${Math.round(t.latencyMs)}ms)`,
+    d.preferences ? `  Preferences: ${describePreferences(d.preferences)}` : '',
     t.error ? `  Classifier error: ${t.error}` : '',
     '',
     'What the task needs',
@@ -44,7 +45,7 @@ export function explainDecision(d: RouteDecision): string {
     `  needs web ${pct(t.needsWeb)} · latency-sensitive ${pct(t.latencySensitive)} · high stakes ${pct(t.highStakes)}`,
     `  input ~${d.facts.inputTokens} tokens${d.facts.hasImages ? ' · images' : ''}${d.facts.toolsPresent ? ' · tools' : ''}${d.facts.jsonSchemaRequired ? ' · json schema' : ''}`,
     '',
-    'Top candidates (score = P(success) x value - cost - latency penalty)',
+    'Top candidates (score = P(success) x value + quality premium - cost - latency penalty - preference penalty)',
     ...d.candidates.slice(0, 8).map((c, i) => {
       const name = `${c.modelId} (${c.effort})`.padEnd(44);
       return `  ${i === 0 ? '→' : ' '} ${name} P ${pct(c.pSuccess).padStart(4)}  ${money(c.estCostUsd).padStart(9)}  ${c.estLatencyS.toFixed(1).padStart(5)}s  score ${c.utility.toFixed(4)}`;
@@ -56,4 +57,13 @@ export function explainDecision(d: RouteDecision): string {
     if (d.escalation.rationale) lines.push(`  ${d.escalation.rationale}`);
   }
   return lines.filter((l, i, all) => l !== '' || all[i - 1] !== '').join('\n');
+}
+
+export function describePreferences(p: Preferences): string {
+  const parts = [`quality x${p.qualityWeight}`, `cost x${p.costWeight}`, `speed x${p.speedWeight}`];
+  if (p.openWeights !== 'any') parts.push(`open weights: ${p.openWeights}`);
+  if (p.preferProviders.length) parts.push(`prefer ${p.preferProviders.join('/')}`);
+  if (p.avoidProviders.length) parts.push(`avoid ${p.avoidProviders.join('/')}`);
+  if (p.minQuality) parts.push(`min quality ${p.minQuality}`);
+  return parts.join(', ');
 }

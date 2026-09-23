@@ -37,6 +37,7 @@ export interface ModelRecord {
   id: string;
   name: string;
   provider: string;
+  openWeights: boolean;
   enabled: boolean;
   contextLength: number;
   maxOutput: number;
@@ -95,8 +96,20 @@ export interface RequestFacts {
   requestedMaxTokens?: number;
 }
 
+// User preferences that steer the optimizer (not Jev). Weights default to 1; the mode sets the baseline.
+export interface Preferences {
+  qualityWeight: number; // >1 = willing to pay more for a better answer ("sacrifice cost for intelligence")
+  costWeight: number; // >1 = more cost-conscious
+  speedWeight: number; // >1 = more impatient
+  openWeights: 'any' | 'prefer' | 'only';
+  preferProviders: string[]; // e.g. ['anthropic', 'google']
+  avoidProviders: string[];
+  minQuality: number; // 0-100: never choose a model whose skill for the request is below this
+}
+
 export interface RoutePrefs {
   mode: Mode;
+  preferences: Preferences;
   maxCostUsd?: number;
   maxLatencyS?: number;
   allowModels?: string[];
@@ -134,6 +147,7 @@ export interface RouteDecision {
   escalation: Escalation | null;
   sessionId?: string;
   stickyModel?: string;
+  preferences?: Preferences;
   routeMs: number;
 }
 

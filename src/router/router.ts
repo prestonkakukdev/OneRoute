@@ -5,7 +5,7 @@ import { buildJevState, extractFacts, latestUserText } from '../classifier/state
 import { config } from '../config.js';
 import type { Store } from '../db/store.js';
 import { chatCompletion } from '../providers/openrouter.js';
-import type { Candidate, ChatRequest, Escalation, RouteDecision, RoutePrefs, TaskProfile } from '../types.js';
+import type { Candidate, ChatRequest, Escalation, Preferences, RouteDecision, RoutePrefs, TaskProfile } from '../types.js';
 import { conservativePick, escalateWithLlm, escalationReasons } from './escalate.js';
 import { rankCandidates, successValue } from './optimizer.js';
 
@@ -39,9 +39,27 @@ function shortlist(ranked: Candidate[]): Candidate[] {
   return out;
 }
 
-export function resolvePrefs(p: Partial<RoutePrefs> | undefined): RoutePrefs {
+export const DEFAULT_PREFERENCES: Preferences = {
+  qualityWeight: 1,
+  costWeight: 1,
+  speedWeight: 1,
+  openWeights: 'any',
+  preferProviders: [],
+  avoidProviders: [],
+  minQuality: 0,
+};
+
+export function resolvePreferences(p?: Partial<Preferences>): Preferences {
+  return { ...DEFAULT_PREFERENCES, ...(config.defaultPreferences as Partial<Preferences>), ...stripUndefined(p ?? {}) };
+}
+
+const stripUndefined = <T extends object>(o: T): Partial<T> =>
+  Object.fromEntries(Object.entries(o).filter(([, v]) => v !== undefined)) as Partial<T>;
+
+export function resolvePrefs(p: Partial<Omit<RoutePrefs, 'preferences'>> & { preferences?: Partial<Preferences> } | undefined): RoutePrefs {
   return {
     mode: p?.mode ?? config.defaultMode,
+    preferences: resolvePreferences(p?.preferences),
     maxCostUsd: p?.maxCostUsd,
     maxLatencyS: p?.maxLatencyS,
     allowModels: p?.allowModels,
@@ -62,7 +80,7 @@ export class Router {
     this.deps = { classify: (s) => classifyWithJev(s), llm: chatCompletion, ...deps };
   }
 
-  async route(req: ChatRequest, prefsIn?: Partial<RoutePrefs>): Promise<RouteDecision> {
+  async route(req: ChatRequest, prefsIn?: Parameters<typeof resolvePrefs>[0]): Promise<RouteDecision> {
     const started = performance.now();
     const prefs = resolvePrefs(prefsIn);
     const facts = extractFacts(req);
@@ -98,7 +116,7 @@ export class Router {
     // 3. Escalate only when the decision is genuinely uncertain.
     let chosen = ranked[0]!;
     let escalation: Escalation | null = null;
-    const reasons = prefs.escalation === 'off' ? [] : escalationReasons(task, ranked, successValue(task, prefs));
+    const reasons = prefs.escalation === 'off' ? [] : escalationReasons(task, ranked, successValue(task, facts, prefs));
     if (reasons.length) {
       const list = shortlist(ranked);
       const t0 = performance.now();
@@ -129,6 +147,7 @@ export class Router {
       escalation,
       sessionId: prefs.sessionId,
       stickyModel: sticky?.modelId,
+      preferences: prefs.preferences,
       routeMs: performance.now() - started,
     };
     this.store.recordDecision(decision, config.storePrompts ? text : '');

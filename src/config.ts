@@ -1,4 +1,4 @@
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { MODES, type Mode } from './taxonomy.js';
 
@@ -15,6 +15,18 @@ function mode(raw: string | undefined): Mode {
   return MODES.includes(raw as Mode) ? (raw as Mode) : 'balanced';
 }
 
+// Optional user defaults (e.g. preferences) in ./mrouter.config.json; request options override them.
+function loadUserConfig(): { mode?: string; preferences?: Record<string, unknown> } {
+  const file = resolve(process.cwd(), 'mrouter.config.json');
+  if (!existsSync(file)) return {};
+  try {
+    return JSON.parse(readFileSync(file, 'utf8'));
+  } catch (err) {
+    throw new Error(`Invalid mrouter.config.json: ${(err as Error).message}`);
+  }
+}
+const userConfig = loadUserConfig();
+
 export const config = {
   openRouterKey: process.env.OPENROUTER_API_KEY ?? '',
   openRouterBaseUrl: process.env.OPENROUTER_BASE_URL ?? 'https://openrouter.ai/api/v1',
@@ -27,7 +39,8 @@ export const config = {
   // Jev usually answers in 0.25-1.2s; the budget covers cold starts before falling back to keywords.
   jevTimeoutMs: num('ROUTER_JEV_TIMEOUT_MS', 6000),
   dbPath: process.env.ROUTER_DB_PATH ?? resolve(process.cwd(), 'router.db'),
-  defaultMode: mode(process.env.ROUTER_DEFAULT_MODE),
+  defaultMode: mode(process.env.ROUTER_DEFAULT_MODE ?? userConfig.mode),
+  defaultPreferences: userConfig.preferences ?? {},
   port: num('ROUTER_PORT', 8787),
   gatewayKey: process.env.ROUTER_API_KEY ?? '',
   escalationModel: process.env.ROUTER_ESCALATION_MODEL ?? 'google/gemini-3.8-flash',

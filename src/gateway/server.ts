@@ -8,7 +8,7 @@ import { chatCompletion, ConfigError } from '../providers/openrouter.js';
 import { RoutingError } from '../router/optimizer.js';
 import type { Router } from '../router/router.js';
 import { MODES, type Mode } from '../taxonomy.js';
-import type { ChatRequest, RoutePrefs } from '../types.js';
+import type { ChatRequest } from '../types.js';
 import { Executor } from './execute.js';
 
 const chatSchema = z
@@ -25,6 +25,17 @@ const chatSchema = z
         web: z.enum(['auto', 'on', 'off']).optional(),
         escalation: z.enum(['auto', 'off']).optional(),
         session_id: z.string().max(200).optional(),
+        preferences: z
+          .object({
+            quality_weight: z.number().min(0).max(100).optional(),
+            cost_weight: z.number().min(0).max(100).optional(),
+            speed_weight: z.number().min(0).max(100).optional(),
+            open_weights: z.enum(['any', 'prefer', 'only']).optional(),
+            prefer_providers: z.array(z.string()).optional(),
+            avoid_providers: z.array(z.string()).optional(),
+            min_quality: z.number().min(0).max(100).optional(),
+          })
+          .optional(),
       })
       .optional(),
   })
@@ -79,8 +90,18 @@ export function createApp(store: Store, router: Router, executor = new Executor(
     const body = parsed.data as unknown as ChatRequest & { router?: z.infer<typeof chatSchema>['router'] };
     const r = parsed.data.router;
     const auto = parseAutoModel(body.model);
-    const prefs: Partial<RoutePrefs> = {
+    const pr = r?.preferences;
+    const prefs = {
       mode: auto.mode ?? r?.mode,
+      preferences: pr && {
+        qualityWeight: pr.quality_weight,
+        costWeight: pr.cost_weight,
+        speedWeight: pr.speed_weight,
+        openWeights: pr.open_weights,
+        preferProviders: pr.prefer_providers,
+        avoidProviders: pr.avoid_providers,
+        minQuality: pr.min_quality,
+      },
       maxCostUsd: r?.max_cost_usd,
       maxLatencyS: r?.max_latency_s,
       allowModels: r?.allow_models,

@@ -1,4 +1,4 @@
-import { DIFFICULTY_VALUE, MODE_WEIGHTS, QUALITY_FLOOR_RATIO } from '../taxonomy.js';
+import { DIFFICULTY_VALUE, jobSizeMultiplier, MODE_WEIGHTS, PREFERENCE_STRENGTH, QUALITY_FLOOR_RATIO } from '../taxonomy.js';
 import type { Candidate, ModelRecord, RequestFacts, RoutePrefs, TaskProfile } from '../types.js';
 import {
   estimateCost,
@@ -17,6 +17,7 @@ const MIN_OUTPUT_ROOM = 1000;
 export function rejectionReason(model: ModelRecord, facts: RequestFacts, prefs: RoutePrefs): string | null {
   if (prefs.allowModels?.length && !prefs.allowModels.includes(model.id)) return 'not in allow list';
   if (prefs.denyModels?.includes(model.id)) return 'in deny list';
+  if (prefs.preferences.openWeights === 'only' && !model.openWeights) return 'closed weights (open-weights only)';
   if (facts.inputTokens + MIN_OUTPUT_ROOM > model.contextLength) return 'context window too small';
   if (facts.hasImages && !model.inputModalities.includes('image')) return 'no image input';
   if (facts.hasFiles && !model.inputModalities.includes('file')) return 'no file input';
@@ -26,14 +27,26 @@ export function rejectionReason(model: ModelRecord, facts: RequestFacts, prefs: 
   return null;
 }
 
-// USD value of a Moderate-difficulty success for this request; high stakes raise it.
-const baseValue = (task: TaskProfile, prefs: RoutePrefs) => MODE_WEIGHTS[prefs.mode].valueUsd * (1 + 2 * task.highStakes);
+// USD value of a Moderate-difficulty success for this request: high stakes and bigger jobs raise it,
+// and so does the user's quality weight.
+const baseValue = (task: TaskProfile, facts: RequestFacts, prefs: RoutePrefs) =>
+  MODE_WEIGHTS[prefs.mode].valueUsd * (1 + 2 * task.highStakes) * jobSizeMultiplier(facts.inputTokens) * prefs.preferences.qualityWeight;
 
 // Expected USD value of a success for this request, across Jev's difficulty distribution.
-export function successValue(task: TaskProfile, prefs: RoutePrefs): number {
+export function successValue(task: TaskProfile, facts: RequestFacts, prefs: RoutePrefs): number {
   let mult = 0;
   for (const [level, p] of Object.entries(task.difficulty.probabilities)) mult += p * (DIFFICULTY_VALUE[Number(level)] ?? 1);
-  return baseValue(task, prefs) * mult;
+  return baseValue(task, facts, prefs) * mult;
+}
+
+// A disfavoured model must beat a favoured one by PREFERENCE_STRENGTH of the request's value.
+function preferencePenalty(model: ModelRecord, prefs: RoutePrefs, value: number): number {
+  const p = prefs.preferences;
+  let penalty = 0;
+  if (p.openWeights === 'prefer' && !model.openWeights) penalty += PREFERENCE_STRENGTH;
+  if (p.avoidProviders.includes(model.provider)) penalty += 2 * PREFERENCE_STRENGTH;
+  if (p.preferProviders.length && !p.preferProviders.includes(model.provider)) penalty += PREFERENCE_STRENGTH;
+  return penalty * value;
 }
 
 export interface RankInput {
@@ -46,12 +59,16 @@ export interface RankInput {
   useWeb: boolean;
 }
 
-// score = P(success) x value - expected cost - expected latency x value of time
+// score = P(success) x value + quality premium - cost - latency x value of time - preference penalty
 // (value varies by difficulty level, so P(success) is value-weighted across Jev's difficulty distribution)
 export function rankCandidates(input: RankInput): { ranked: Candidate[]; rejected: Record<string, string> } {
   const { task, facts, prefs } = input;
-  const value = baseValue(task, prefs);
-  const latencyPrice = MODE_WEIGHTS[prefs.mode].latencyUsdPerSec * (1 + 9 * task.latencySensitive);
+  const pref = prefs.preferences;
+  const weights = MODE_WEIGHTS[prefs.mode];
+  const value = baseValue(task, facts, prefs);
+  const premium = weights.qualityPremiumUsd * pref.qualityWeight;
+  const latencyPrice = weights.latencyUsdPerSec * (1 + 9 * task.latencySensitive) * pref.speedWeight;
+  const requestValue = successValue(task, facts, prefs) + premium;
   const rejected: Record<string, string> = {};
   const ranked: Candidate[] = [];
   const needs = requirementsByType(task, facts);
@@ -72,13 +89,19 @@ export function rankCandidates(input: RankInput): { ranked: Candidate[]; rejecte
       if (prefs.maxCostUsd !== undefined && estCostUsd > prefs.maxCostUsd) continue;
       if (prefs.maxLatencyS !== undefined && estLatencyS > prefs.maxLatencyS) continue;
       const success = expectedSuccess(model, effort, task, input.learning, needs);
+      if (success.skill < pref.minQuality) continue;
       ranked.push({
         modelId: model.id,
         effort,
         pSuccess: success.p,
         estCostUsd,
         estLatencyS,
-        utility: success.valueWeighted * value - estCostUsd - estLatencyS * latencyPrice,
+        utility:
+          success.valueWeighted * value +
+          (premium * success.skill) / 100 -
+          pref.costWeight * estCostUsd -
+          estLatencyS * latencyPrice -
+          preferencePenalty(model, prefs, requestValue),
       });
     }
   }

@@ -7,6 +7,7 @@ export interface OpenRouterModel {
   id: string;
   name: string;
   created?: number;
+  hugging_face_id?: string | null;
   context_length: number;
   architecture?: { input_modalities?: string[] };
   pricing: Record<string, unknown>;
@@ -28,6 +29,7 @@ type ModelMetadata = Pick<
   | 'efforts'
   | 'reasoningMandatory'
   | 'defaultEffort'
+  | 'openWeights'
 >;
 
 const price = (v: unknown): number | undefined => {
@@ -87,6 +89,8 @@ export function parseOpenRouterModel(raw: OpenRouterModel): ModelMetadata {
     inputModalities: raw.architecture?.input_modalities ?? ['text'],
     supportedParams: raw.supported_parameters ?? [],
     pricing: parsePricing(raw.pricing),
+    // OpenRouter links a Hugging Face repo only for models whose weights are published.
+    openWeights: Boolean(raw.hugging_face_id),
     ...parseEfforts(raw),
   };
 }

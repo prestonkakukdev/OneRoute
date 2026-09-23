@@ -2,12 +2,13 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { buildSeedModels } from '../src/db/seed.js';
 import { statKey, type SuccessStat } from '../src/db/store.js';
 import { rankCandidates, RoutingError } from '../src/router/optimizer.js';
+import { resolvePrefs } from '../src/router/router.js';
 import type { ModelRecord, RoutePrefs } from '../src/types.js';
 import { facts, makeTask } from './fixtures.js';
 
 let models: ModelRecord[];
 const noLearning = { stats: new Map<string, SuccessStat>(), priorStrength: 10, exploration: 'off' as const };
-const prefs = (over: Partial<RoutePrefs> = {}): RoutePrefs => ({ mode: 'balanced', ...over });
+const prefs = (over: Partial<RoutePrefs> = {}): RoutePrefs => ({ ...resolvePrefs({ mode: 'balanced' }), ...over });
 const byId = (id: string) => models.find((m) => m.id === id)!;
 
 beforeEach(() => {
@@ -93,5 +94,59 @@ describe('rankCandidates', () => {
       rankCandidates({ models, task, facts: f, prefs: prefs({ allowModels: ['anthropic/claude-opus-5.5'] }), learning: noLearning, useWeb: false, stickyModelId: sticky })
         .ranked.find((c) => c.effort === 'low')!.estCostUsd;
     expect(cost('anthropic/claude-opus-5.5')).toBeLessThan(cost() * 0.5);
+  });
+});
+
+describe('preferences and value', () => {
+  const run = (over: Parameters<typeof resolvePrefs>[0] = {}, task = makeTask({ type: 'coding_debug', difficulty: 2 }), f = facts()) =>
+    rankCandidates({ models, task, facts: f, prefs: resolvePrefs({ mode: 'balanced', ...over }), learning: noLearning, useWeb: false }).ranked;
+
+  it('open-weights "only" filters closed models; "prefer" favours open ones', () => {
+    for (const m of models) m.openWeights = m.provider === 'z-ai' || m.provider === 'deepseek';
+    expect(run({ preferences: { openWeights: 'only' } }).every((c) => byId(c.modelId).openWeights)).toBe(true);
+    const preferred = run({ preferences: { openWeights: 'prefer' } })[0]!;
+    const neutral = run()[0]!;
+    expect(byId(preferred.modelId).openWeights || !byId(neutral.modelId).openWeights).toBe(true);
+  });
+
+  it('a higher quality weight buys a better model', () => {
+    const cheap = rankCandidates({ models, task: makeTask({ type: 'coding_debug', difficulty: 2 }), facts: facts(), prefs: resolvePrefs({ mode: 'cheap' }), learning: noLearning, useWeb: false }).ranked[0]!;
+    const quality = rankCandidates({ models, task: makeTask({ type: 'coding_debug', difficulty: 2 }), facts: facts(), prefs: resolvePrefs({ mode: 'cheap', preferences: { qualityWeight: 20 } }), learning: noLearning, useWeb: false }).ranked[0]!;
+    expect(quality.pSuccess).toBeGreaterThan(cheap.pSuccess);
+  });
+
+  it('avoided providers lose, and a quality floor removes weak candidates', () => {
+    const top = run()[0]!;
+    const avoided = run({ preferences: { avoidProviders: [byId(top.modelId).provider] } })[0]!;
+    expect(byId(avoided.modelId).provider).not.toBe(byId(top.modelId).provider);
+    const floor = run({ preferences: { minQuality: 70 } });
+    expect(floor.length).toBeGreaterThan(0);
+    expect(floor.length).toBeLessThan(run().length);
+  });
+
+  it('bigger jobs justify stronger models', () => {
+    const task = makeTask({ type: 'coding_refactor', difficulty: 3, depth: 2 });
+    const small = run({}, task, facts({ inputTokens: 2_000 }))[0]!;
+    const big = run({}, task, facts({ inputTokens: 200_000 }))[0]!;
+    expect(big.pSuccess).toBeGreaterThanOrEqual(small.pSuccess);
+  });
+
+  it('answer quality matters even when every model would pass', () => {
+    const greeting = makeTask({ type: 'chat', difficulty: 0, depth: 0, output: 0, latencySensitive: 0.9 });
+    const base = byId('openai/gpt-6-luna');
+    const twin = (id: string, skill: number): ModelRecord => ({
+      ...base,
+      id,
+      skills: { ...base.skills, conversation: { ...base.skills.conversation!, skill } },
+    });
+    const ranked = rankCandidates({
+      models: [twin('x/weak', 25), twin('x/strong', 60)],
+      task: greeting,
+      facts: facts(),
+      prefs: resolvePrefs({ mode: 'balanced' }),
+      learning: noLearning,
+      useWeb: false,
+    }).ranked;
+    expect(ranked[0]!.modelId).toBe('x/strong');
   });
 });

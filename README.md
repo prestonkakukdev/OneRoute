@@ -86,6 +86,31 @@ Set `ROUTER_API_KEY` to require a bearer token.
 | `src/gateway/` | Executes against OpenRouter with fallbacks, passes streams through, and records usage. Also the HTTP server. |
 | `data/` | Seed priors (`seed.json`) and an OpenRouter metadata snapshot, so it works before the first `sync`. |
 
+## Preferences
+
+Modes (`cheap` / `balanced` / `best`) set the baseline; preferences steer the optimizer on top of that.
+
+| Preference | Effect |
+|---|---|
+| `quality_weight` (default 1) | >1 = pay more for a better answer ("sacrifice cost for intelligence") |
+| `cost_weight`, `speed_weight` | >1 = more cost-conscious / more impatient |
+| `open_weights` | `any`, `prefer` (closed models must clearly win), `only` (closed models excluded) |
+| `prefer_providers`, `avoid_providers` | Soft preference, e.g. `["anthropic","google"]` |
+| `min_quality` (0-100) | Never pick a model whose skill for the request is below this |
+
+```bash
+mrouter chat --pref quality=3 --pref open=prefer --pref avoid=x-ai
+```
+```json
+// mrouter.config.json (your defaults)
+{ "mode": "balanced", "preferences": { "qualityWeight": 2, "openWeights": "prefer" } }
+```
+Per request (API): `"router": { "preferences": { "quality_weight": 3, "open_weights": "only" } }`.
+
+Always on: a success is worth more for bigger jobs (input size), answer quality counts even when every model would
+"pass" (so a greeting goes to a fast, well-liked model rather than the weakest one), and live reliability only counts
+once a model has a real traffic record on OpenRouter.
+
 ## The capability database (steps 1-3)
 
 ```bash
