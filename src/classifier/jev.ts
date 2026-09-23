@@ -75,6 +75,11 @@ const CORE_QUESTIONS = {
     instructions:
       'Would a wrong or sloppy answer be costly, e.g. production code, legal, medical or financial decisions, or an important document?',
   },
+  underspecified: {
+    type: 'noul',
+    instructions:
+      'Is `latest_user_message` too vague to act on even with the earlier conversation, e.g. it refers to code, files or a problem that were never provided, so the right reply is a clarifying question?',
+  },
 } as const;
 
 export const JEV_QUESTIONS = { ...CORE_QUESTIONS, ...capabilityQuestions };
@@ -104,6 +109,7 @@ export const jevResponseSchema = z.object({
       needs_web: noulAnswer,
       latency_sensitive: noulAnswer,
       high_stakes: noulAnswer,
+      underspecified: noulAnswer.optional(),
     })
     .catchall(z.union([choiceAnswer, scoreAnswer, noulAnswer])),
 });
@@ -146,6 +152,7 @@ export function toTaskProfile(res: JevResponse, latencyMs: number): TaskProfile 
     needsWeb: a.needs_web.noul,
     latencySensitive: a.latency_sensitive.noul,
     highStakes: a.high_stakes.noul,
+    underspecified: a.underspecified?.noul ?? 0,
     source: 'jev',
     latencyMs,
   };

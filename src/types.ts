@@ -78,6 +78,7 @@ export interface TaskProfile {
   needsWeb: number; // probability
   latencySensitive: number;
   highStakes: number;
+  underspecified?: number; // probability the request cannot be acted on without clarification
   source: 'jev' | 'heuristic';
   latencyMs: number;
   error?: string;

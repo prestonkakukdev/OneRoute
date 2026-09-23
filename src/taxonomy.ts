@@ -189,7 +189,7 @@ export const JEV_CAPABILITY_QUESTIONS: Partial<Record<Capability, string>> = {
   long_context: 'reading and reasoning over a very long document, codebase or conversation provided in the request',
   agentic_tool_use: 'calling tools or APIs over several steps to get the job done',
   computer_use:
-    'the model itself operating a graphical interface by looking at the screen and clicking or typing (not just writing code, calling APIs or searching the web)',
+    'the model itself taking actions in a graphical interface: clicking, typing and navigating apps or websites on screen. Only analysing a screenshot or image does not count, nor does writing code, calling APIs or searching the web',
   web_research: 'looking up current or external information on the web',
   vision: 'understanding images, screenshots, charts or video',
   instruction_following: 'following strict formats, constraints or detailed instructions exactly',

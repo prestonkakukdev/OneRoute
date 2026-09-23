@@ -41,7 +41,10 @@ export const depthFactor = (task: TaskProfile) => expectedLevel(task.reasoningDe
 export function requirementWeights(type: TaskType, task: TaskProfile, facts?: RequestFacts): Partial<Record<Capability, number>> {
   const w: Partial<Record<Capability, number>> = { ...TASK_CAPABILITY_MIX[type] };
   for (const [cap, importance] of Object.entries(task.capabilities) as [Capability, number][]) {
-    w[cap] = (w[cap] ?? 0) + importance;
+    // Operating a GUI only matters when the job is to act (agentic); Jev tends to over-rate it for
+    // requests that merely mention screenshots, browsers or research.
+    const gate = cap === 'computer_use' ? 0.3 + 0.7 * (task.taskType.probabilities.agentic ?? 0) : 1;
+    w[cap] = (w[cap] ?? 0) + importance * gate;
   }
   if (facts) {
     const atLeast = (cap: Capability, v: number) => (w[cap] = Math.max(w[cap] ?? 0, v));

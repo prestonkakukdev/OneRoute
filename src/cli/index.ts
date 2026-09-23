@@ -17,6 +17,7 @@ import { fetchProviderStats } from '../ingest/providerStats.js';
 import { ModelResolver } from '../ingest/resolve.js';
 import { loadVendorResults, type ExternalResult } from '../ingest/vendor.js';
 import { generateProfiles } from '../ingest/profiles.js';
+import { loadCases, runBench, summarize, writeRows } from '../bench.js';
 import { fetchModels } from '../providers/openrouter.js';
 import { Executor } from '../gateway/execute.js';
 import { createApp } from '../gateway/server.js';
@@ -179,27 +180,26 @@ program
 
 program
   .command('bench <file>')
-  .description('Route every prompt in a file (one per line, or JSONL with a "prompt" field) in each mode; no model is called')
+  .description('Route a prompt set (text lines or JSONL cases) in each mode, flag suspicious routes, save results; no model is called')
   .option('--modes <modes...>', 'modes to compare', ['cheap', 'balanced', 'best'])
-  .option('--json', 'print raw decisions as JSONL')
-  .action(async (file: string, opts: { modes: string[]; json?: boolean }) => {
+  .option('--out <file>', 'results JSONL', `bench/results/${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')}.jsonl`)
+  .option('--quiet', 'only print flagged routes and the summary')
+  .action(async (file: string, opts: { modes: string[]; out: string; quiet?: boolean }) => {
     const modes = opts.modes.map(parseMode);
-    const prompts = readFileSync(file, 'utf8')
-      .split('\n')
-      .map((l) => l.trim())
-      .filter(Boolean)
-      .map((l) => (l.startsWith('{') ? (JSON.parse(l) as { prompt: string }).prompt : l));
     warnMissingKeys();
     const store = new Store(config.dbPath);
-    const router = new Router(store);
-    for (const prompt of prompts) {
-      if (!opts.json) console.log(`\n${prompt.length > 110 ? `${prompt.slice(0, 107)}...` : prompt}`);
-      for (const mode of modes) {
-        const d = await router.route({ messages: [{ role: 'user', content: prompt }] }, { mode, escalation: 'off' });
-        if (opts.json) console.log(JSON.stringify({ prompt, mode, decision: d }));
-        else console.log(`  ${mode.padEnd(8)} ${summaryLine(d)}`);
-      }
-    }
+    let lastHeader = '';
+    const rows = await runBench(store, loadCases(file), modes, (c, r) => {
+      if (opts.quiet && !r.flags.length) return;
+      if (lastHeader !== c.id && (lastHeader = c.id)) console.log(`\n${c.id} [${c.cat}${c.expect ? `, expect ${c.expect}` : ''}] ${c.prompt.length > 90 ? `${c.prompt.slice(0, 87)}...` : c.prompt}`);
+      const needs = Object.entries(r.needs).sort((a, b) => b[1] - a[1]).slice(0, 3).map(([k, v]) => `${k} ${v}`).join(', ');
+      console.log(
+        `  ${r.mode.padEnd(8)} ${`${r.model} (${r.effort})`.padEnd(46)} P${(r.pSuccess * 100).toFixed(0).padStart(3)}% $${r.costUsd.toFixed(4).padStart(7)} ${r.latencyS.toFixed(1).padStart(5)}s${r.web ? ' web' : ''} | ${r.taskType} d${r.difficulty} | ${needs}`,
+      );
+      for (const f of r.flags) console.log(red(`           ⚑ ${f}`));
+    });
+    writeRows(opts.out, rows);
+    console.log(`\n${summarize(rows)}\nresults: ${opts.out}`);
     store.close();
   });
 

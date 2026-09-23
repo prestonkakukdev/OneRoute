@@ -15,6 +15,16 @@ export interface RouterDeps {
 }
 
 const SHORTLIST_SIZE = 5;
+const UNDERSPECIFIED_THRESHOLD = 0.8;
+
+function asClarification(task: TaskProfile): TaskProfile {
+  const level = (n: number, v: number) => ({
+    value: v,
+    probabilities: Object.fromEntries(Array.from({ length: n }, (_, i) => [i, i === v ? 1 : 0])) as Record<number, number>,
+    confidence: 1,
+  });
+  return { ...task, difficulty: level(5, 1), reasoningDepth: level(4, 0), outputLength: level(4, 0) };
+}
 
 // Best effort level per model, in rank order.
 function shortlist(ranked: Candidate[]): Candidate[] {
@@ -66,10 +76,15 @@ export class Router {
       task = classifyHeuristically(text, facts, (err as Error).message);
     }
 
+    // A request that cannot be acted on needs a clarifying question, which any competent model can ask.
+    // Not when tools are available: an agent can go and find the missing context itself.
+    if ((task.underspecified ?? 0) >= UNDERSPECIFIED_THRESHOLD && !facts.toolsPresent) task = asClarification(task);
+
     // 2. Deterministic optimization over the capability database.
     const models = this.store.listModels();
     const sticky = prefs.sessionId ? this.store.getSession(prefs.sessionId) : undefined;
-    const useWeb = prefs.web === 'on' || (prefs.web === 'auto' && task.needsWeb >= 0.6);
+    // Auto web search only when the client brings no tools of its own (an agent can search itself).
+    const useWeb = prefs.web === 'on' || (prefs.web === 'auto' && task.needsWeb >= 0.6 && !facts.toolsPresent);
     const { ranked } = rankCandidates({
       models,
       task,
