@@ -3,6 +3,7 @@ import { chatCompletion, ConfigError } from '../providers/openrouter.js';
 import { config } from '../config.js';
 import type { Effort } from '../taxonomy.js';
 import { estimateTokens } from '../classifier/state.js';
+import { CACHE_MIN_TOKENS, cachePlan } from '../cache.js';
 import type { ChatMessage, ChatRequest, ModelRecord, RequestFacts, RouteDecision } from '../types.js';
 import { SseLineParser } from './sse.js';
 
@@ -11,6 +12,7 @@ interface Usage {
   completion_tokens?: number;
   cost?: number;
   completion_tokens_details?: { reasoning_tokens?: number };
+  prompt_tokens_details?: { cached_tokens?: number; cache_write_tokens?: number };
 }
 
 export interface Attempt {
@@ -47,8 +49,9 @@ export const CONTINUITY_NOTE =
   'If you cannot access information the user needs right now (for example, live web results), say so briefly and ' +
   'answer as well as you can.';
 
+// Always present (not only once assistant turns exist): the start of the prompt must not change between
+// turns, or the provider's prompt cache from the previous turn cannot be reused.
 function withContinuityNote(messages: ChatMessage[]): ChatMessage[] {
-  if (!messages.some((m) => m.role === 'assistant')) return messages;
   const firstNonSystem = messages.findIndex((m) => m.role !== 'system' && m.role !== 'developer');
   const at = firstNonSystem < 0 ? messages.length : firstNonSystem;
   return [...messages.slice(0, at), { role: 'system', content: CONTINUITY_NOTE }, ...messages.slice(at)];
@@ -59,7 +62,7 @@ export function buildUpstreamBody(
   modelId: string,
   effort: Effort,
   model: ModelRecord | undefined,
-  decision: Pick<RouteDecision, 'useWeb' | 'facts'>,
+  decision: Pick<RouteDecision, 'useWeb' | 'facts'> & Partial<Pick<RouteDecision, 'sessionId' | 'sessionExplicit'>>,
 ): Record<string, unknown> {
   const { router: _router, ...rest } = req;
   const body: Record<string, unknown> = { ...rest, messages: withContinuityNote(req.messages), model: modelId, usage: { include: true } };
@@ -70,25 +73,26 @@ export function buildUpstreamBody(
     const plugins = Array.isArray(req.plugins) ? (req.plugins as unknown[]) : [];
     body.plugins = [...plugins, { id: 'web' }];
   }
-  if (model?.provider === 'anthropic') addAnthropicCacheBreakpoints(body, decision.facts);
+  if (model?.provider === 'anthropic') addAnthropicCacheBreakpoints(body, decision.facts, cachePlan(decision.facts, Boolean(decision.sessionId) && decision.sessionExplicit !== false));
   return body;
 }
 
-const CACHE_MIN_TOKENS = 1024;
-
 // Anthropic caches only at explicit breakpoints (other providers cache prefixes automatically).
-// Verified live: a breakpoint on a long system prompt is reused across different questions, and the
-// top-level automatic breakpoint is reused as a conversation grows.
-function addAnthropicCacheBreakpoints(body: Record<string, unknown>, facts: RequestFacts): void {
+// Verified live: a breakpoint on a long system prompt is reused across different questions, the top-level
+// breakpoint is reused as a conversation grows, and ttl "1h" is honoured (billed at the 1-hour write price).
+function addAnthropicCacheBreakpoints(body: Record<string, unknown>, facts: RequestFacts, plan: { write: boolean; ttl: '5m' | '1h' }): void {
+  if (!plan.write) return;
+  const control = plan.ttl === '1h' ? { type: 'ephemeral', ttl: '1h' } : { type: 'ephemeral' };
   const messages = body.messages as ChatMessage[];
   const i = messages.findIndex((m) => m.role === 'system');
   const system = messages[i];
+  // Same TTL on both breakpoints: Anthropic rejects a longer-lived breakpoint after a shorter one.
   if (system && typeof system.content === 'string' && estimateTokens(system.content) >= CACHE_MIN_TOKENS) {
     const copy = [...messages];
-    copy[i] = { ...system, content: [{ type: 'text', text: system.content, cache_control: { type: 'ephemeral' } }] };
+    copy[i] = { ...system, content: [{ type: 'text', text: system.content, cache_control: control }] };
     body.messages = copy;
   }
-  if (facts.prefixTokens >= CACHE_MIN_TOKENS && !('cache_control' in body)) body.cache_control = { type: 'ephemeral' };
+  if (!('cache_control' in body)) body.cache_control = control;
 }
 
 function fallbackChain(decision: RouteDecision): { modelId: string; effort: Effort }[] {
@@ -160,8 +164,8 @@ export class Executor {
       }
       attempts.push({ modelId, effort, status: res.status });
       const headers = routerHeaders(decision, modelId, effort);
-      const finish = (usage: Usage | undefined, ttftMs: number | undefined, error?: string) =>
-        this.finish(decision, modelId, effort, usage, ttftMs, performance.now() - started, models.get(modelId), attempts.length - 1, error);
+      const finish = (usage: Usage | undefined, ttftMs: number | undefined, error?: string, provider?: string) =>
+        this.finish(decision, modelId, effort, usage, ttftMs, performance.now() - started, models.get(modelId), attempts.length - 1, error, provider);
 
       if (req.stream && res.body) {
         return {
@@ -174,8 +178,8 @@ export class Executor {
           attempts,
         };
       }
-      const json = (await res.json()) as { usage?: Usage; [k: string]: unknown };
-      finish(json.usage, undefined);
+      const json = (await res.json()) as { usage?: Usage; provider?: string; [k: string]: unknown };
+      finish(json.usage, undefined, undefined, json.provider);
       json.router = routerMetadata(decision, modelId, effort, attempts);
       return {
         response: new Response(JSON.stringify(json), { status: 200, headers: { 'content-type': 'application/json', ...headers } }),
@@ -206,6 +210,7 @@ export class Executor {
     model: ModelRecord | undefined,
     fallbacks: number,
     error?: string,
+    provider?: string,
   ): void {
     this.store.recordOutcome({
       requestId: decision.requestId,
@@ -220,6 +225,9 @@ export class Executor {
       completionTokens: usage?.completion_tokens,
       reasoningTokens: usage?.completion_tokens_details?.reasoning_tokens,
       costUsd: usage?.cost,
+      cachedTokens: usage?.prompt_tokens_details?.cached_tokens,
+      cacheWriteTokens: usage?.prompt_tokens_details?.cache_write_tokens,
+      provider,
     });
     if (error) return;
     // Learn real speed. Without a measured first-token time, assume the current estimate.
@@ -232,14 +240,16 @@ export class Executor {
 
 // Passes the upstream SSE bytes through untouched while watching for first-token time and usage.
 // A client that disconnects mid-stream is still recorded (as an interrupted request).
-function tap(onDone: (usage: Usage | undefined, ttftMs: number | undefined, error?: string) => void, started: number) {
+function tap(onDone: (usage: Usage | undefined, ttftMs: number | undefined, error?: string, provider?: string) => void, started: number) {
   const parser = new SseLineParser();
   let usage: Usage | undefined;
   let ttftMs: number | undefined;
+  let provider: string | undefined;
   const inspect = (events: unknown[]) => {
     for (const e of events) {
-      const ev = e as { usage?: Usage; choices?: { delta?: Record<string, unknown> }[] };
+      const ev = e as { usage?: Usage; provider?: string; choices?: { delta?: Record<string, unknown> }[] };
       if (ev.usage) usage = ev.usage;
+      if (ev.provider) provider = ev.provider;
       const delta = ev.choices?.[0]?.delta;
       if (ttftMs === undefined && delta && (delta.content || delta.reasoning || delta.tool_calls)) {
         ttftMs = performance.now() - started;
@@ -254,10 +264,10 @@ function tap(onDone: (usage: Usage | undefined, ttftMs: number | undefined, erro
     },
     flush() {
       inspect(parser.flush());
-      onDone(usage, ttftMs);
+      onDone(usage, ttftMs, undefined, provider);
     },
     cancel(reason) {
-      onDone(usage, ttftMs, `stream cancelled: ${String(reason ?? 'client disconnected')}`);
+      onDone(usage, ttftMs, `stream cancelled: ${String(reason ?? 'client disconnected')}`, provider);
     },
   };
   return new TransformStream<Uint8Array, Uint8Array>(transformer);

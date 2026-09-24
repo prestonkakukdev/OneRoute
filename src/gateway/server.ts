@@ -1,4 +1,5 @@
-import { timingSafeEqual } from 'node:crypto';
+import { createHash, timingSafeEqual } from 'node:crypto';
+import { conversationId } from '../cache.js';
 import { Hono, type Context } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
 import { streamSSE } from 'hono/streaming';
@@ -69,6 +70,9 @@ function openAiError(c: Context, status: number, message: string, type = 'invali
   return c.json({ error: { message, type } }, status as 400);
 }
 
+// Distinguishes callers when deriving conversation ids, without keeping their keys.
+const callerKey = (c: Context) => createHash('sha256').update(c.req.header('authorization') ?? '').digest('hex').slice(0, 16);
+
 function keyMatches(given: string, expected: string): boolean {
   const a = Buffer.from(given);
   const b = Buffer.from(expected);
@@ -103,6 +107,7 @@ export function createApp(store: Store, router: Router, executor = new Executor(
     const r = parsed.data.router;
     const auto = parseAutoModel(body.model);
     const pr = r?.preferences;
+    const explicitSession = r?.session_id ?? c.req.header('x-router-session');
     const prefs = {
       mode: auto.mode ?? r?.mode,
       preferences: pr && {
@@ -120,7 +125,8 @@ export function createApp(store: Store, router: Router, executor = new Executor(
       denyModels: r?.deny_models,
       web: r?.web,
       escalation: r?.escalation,
-      sessionId: r?.session_id ?? c.req.header('x-router-session'),
+      sessionId: explicitSession ?? conversationId(body.messages, callerKey(c)),
+      sessionExplicit: Boolean(explicitSession),
     };
     return { body, auto, prefs };
   };

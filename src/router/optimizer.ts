@@ -1,6 +1,8 @@
 import { DIFFICULTY_VALUE, jobSizeMultiplier, MODE_WEIGHTS, PREFERENCE_STRENGTH, QUALITY_FLOOR_RATIO } from '../taxonomy.js';
 import type { Candidate, ModelRecord, RequestFacts, RoutePrefs, TaskProfile } from '../types.js';
+import { cachePlan } from '../cache.js';
 import {
+  cachedPrefixTokens,
   estimateCost,
   estimateLatencySeconds,
   estimateTokens,
@@ -59,6 +61,10 @@ export interface RankInput {
   useWeb: boolean;
 }
 
+// Staying on the conversation's model gets a small edge (fraction of the request's value) on top of the
+// cache savings, so near-ties do not make the router bounce between models from turn to turn.
+const STAY_BONUS = 0.03;
+
 // score = P(success) x value + quality premium - cost - latency x value of time - preference penalty
 // (value varies by difficulty level, so P(success) is value-weighted across Jev's difficulty distribution)
 export function rankCandidates(input: RankInput): { ranked: Candidate[]; rejected: Record<string, string> } {
@@ -81,11 +87,14 @@ export function rankCandidates(input: RankInput): { ranked: Candidate[]; rejecte
     }
     for (const effort of model.efforts) {
       const tokens = estimateTokens(task, effort, facts, model);
-      const estCostUsd = estimateCost(model, tokens, facts, {
-        sticky: model.id === input.stickyModelId,
+      const sticky = model.id === input.stickyModelId;
+      const plan = cachePlan(facts, Boolean(prefs.sessionId) && prefs.sessionExplicit !== false);
+      const cache = { sticky, writes: plan.write, ttl: plan.ttl };
+      const estCostUsd = estimateCost(model, tokens, facts, { sticky, useWeb: input.useWeb, cache });
+      const estLatencyS = estimateLatencySeconds(model, tokens, effort, {
         useWeb: input.useWeb,
+        cachedTokens: cachedPrefixTokens(model, facts, cache),
       });
-      const estLatencyS = estimateLatencySeconds(model, tokens, effort, { useWeb: input.useWeb });
       if (prefs.maxCostUsd !== undefined && estCostUsd > prefs.maxCostUsd) continue;
       if (prefs.maxLatencyS !== undefined && estLatencyS > prefs.maxLatencyS) continue;
       const success = expectedSuccess(model, effort, task, input.learning, needs);
@@ -95,7 +104,7 @@ export function rankCandidates(input: RankInput): { ranked: Candidate[]; rejecte
         quality: (premium * success.skill) / 100,
         cost: pref.costWeight * estCostUsd,
         latency: estLatencyS * latencyPrice,
-        preference: preferencePenalty(model, prefs, requestValue),
+        preference: preferencePenalty(model, prefs, requestValue) - (sticky ? STAY_BONUS * requestValue : 0),
       };
       ranked.push({
         modelId: model.id,

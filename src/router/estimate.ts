@@ -246,11 +246,24 @@ export function estimateTokens(task: TaskProfile, effort: Effort, facts: Request
   return { input: facts.inputTokens, output: Math.round(output), reasoning: Math.round(reasoning) };
 }
 
+// Prompt-cache accounting: the session's current model reads the conversation so far from its cache; any
+// model on an explicit-cache provider (Anthropic) that starts or extends a cache pays the write premium on the
+// tokens it caches. Switching models therefore costs a full re-read plus a new cache write.
+export interface CacheContext {
+  sticky: boolean; // this model served the previous turn of the conversation
+  writes: boolean; // the router will ask this provider to write a cache for this request
+  ttl: '5m' | '1h';
+}
+
+export function cachedPrefixTokens(model: ModelRecord, facts: RequestFacts, cache?: CacheContext): number {
+  return cache?.sticky && model.pricing.cacheReadPerTok !== undefined ? facts.prefixTokens : 0;
+}
+
 export function estimateCost(
   model: ModelRecord,
   tokens: { input: number; output: number; reasoning: number },
   facts: RequestFacts,
-  opts: { sticky: boolean; useWeb: boolean },
+  opts: { sticky: boolean; useWeb: boolean; cache?: CacheContext },
 ): number {
   const p = model.pricing;
   const tier = (p.longContext ?? [])
@@ -263,9 +276,14 @@ export function estimateCost(
   // Staying on the session's model lets the conversation prefix be read from the prompt cache.
   const cached = opts.sticky && cacheRead !== undefined ? Math.min(facts.prefixTokens, tokens.input) : 0;
   const webTokens = opts.useWeb ? WEB_CONTEXT_TOKENS : 0;
+  // Tokens newly written to an explicit cache cost the write price instead of the input price.
+  const explicit = model.provider === 'anthropic' && p.cacheWritePerTok !== undefined;
+  const writePrice = opts.cache?.ttl === '1h' ? (p.cacheWrite1hPerTok ?? p.cacheWritePerTok) : p.cacheWritePerTok;
+  const freshPrice = explicit && opts.cache?.writes && writePrice !== undefined ? writePrice : inputPrice;
   return (
     cached * cacheRead! +
-    (tokens.input - cached + webTokens) * inputPrice +
+    (tokens.input - cached) * freshPrice +
+    webTokens * inputPrice +
     tokens.output * outputPrice +
     tokens.reasoning * reasoningPrice +
     (opts.useWeb ? (p.webSearchPerCall ?? 0.02) : 0)
@@ -289,12 +307,13 @@ export function estimateLatencySeconds(
   model: ModelRecord,
   tokens: { input: number; output: number; reasoning: number },
   effort: Effort,
-  opts: { useWeb: boolean } = { useWeb: false },
+  opts: { useWeb: boolean; cachedTokens?: number } = { useWeb: false },
 ): number {
   const m = metricsFor(model, effort);
+  // Cached prompt tokens are not re-processed, so a warm cache also starts answering sooner.
   const base =
     m.ttftS +
-    tokens.input / PREFILL_TOKENS_PER_S +
+    Math.max(0, tokens.input - (opts.cachedTokens ?? 0)) / PREFILL_TOKENS_PER_S +
     (opts.useWeb ? WEB_SEARCH_S : 0) +
     (tokens.output + tokens.reasoning) / Math.max(m.tps, 1);
   return base * (1 + 2 * (1 - reliability(model)));

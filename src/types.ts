@@ -12,6 +12,8 @@ export interface Pricing {
   outputPerTok: number;
   reasoningPerTok: number;
   cacheReadPerTok?: number;
+  cacheWritePerTok?: number; // explicit-cache providers (Anthropic): 5-minute cache write
+  cacheWrite1hPerTok?: number; // 1-hour cache write
   webSearchPerCall?: number;
   longContext?: LongContextPrice[];
 }
@@ -117,6 +119,8 @@ export interface RoutePrefs {
   web?: 'auto' | 'on' | 'off';
   escalation?: 'auto' | 'off';
   sessionId?: string;
+  // false when the router derived the id from the conversation itself (the client sent none)
+  sessionExplicit?: boolean;
 }
 
 export interface Candidate {
@@ -149,6 +153,7 @@ export interface RouteDecision {
   candidates: Candidate[]; // ranked, best first
   escalation: Escalation | null;
   sessionId?: string;
+  sessionExplicit?: boolean;
   stickyModel?: string;
   preferences?: Preferences;
   needs?: Partial<Record<Capability, number>>; // requirement weights for the most likely task type

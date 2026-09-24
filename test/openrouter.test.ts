@@ -36,29 +36,64 @@ describe('upstream request', () => {
       'anthropic/claude-opus-5.5',
       'low',
       opus,
-      { useWeb: true, facts: { prefixTokens: 5000 } as never },
+      { useWeb: true, facts: { prefixTokens: 5000, inputTokens: 6000 } as never },
     );
     expect(body.router).toBeUndefined();
     expect(body.model).toBe('anthropic/claude-opus-5.5');
     expect(body.reasoning).toEqual({ effort: 'low' });
     expect(body.plugins).toEqual([{ id: 'web' }]);
-    expect(body.cache_control).toEqual({ type: 'ephemeral' });
+    expect(body.cache_control).toEqual({ type: 'ephemeral', ttl: '1h' }); // a conversation: 1-hour cache
     expect(body.usage).toEqual({ include: true });
   });
 });
 
 describe('multi-model continuity', () => {
-  it('adds a fixed note once the conversation has earlier assistant turns, after any system prompt', async () => {
+  it('always adds the same note right after any system prompt, so the prompt start never changes between turns', async () => {
     const { CONTINUITY_NOTE } = await import('../src/gateway/execute.js');
-    const first = buildUpstreamBody({ messages: [{ role: 'user', content: 'hi' }] }, 'x/y', 'low', undefined, { useWeb: false, facts: { prefixTokens: 0 } as never });
-    expect((first.messages as { content: string }[]).some((m) => m.content === CONTINUITY_NOTE)).toBe(false);
+    const first = buildUpstreamBody({ messages: [{ role: 'user', content: 'hi' }] }, 'x/y', 'low', undefined, { useWeb: false, facts: { prefixTokens: 0, inputTokens: 5 } as never });
+    expect((first.messages as { content: string }[])[0]!.content).toBe(CONTINUITY_NOTE);
     const later = buildUpstreamBody(
       { messages: [{ role: 'system', content: 'be nice' }, { role: 'user', content: 'hi' }, { role: 'assistant', content: 'hello' }, { role: 'user', content: 'more' }] },
-      'x/y', 'low', undefined, { useWeb: false, facts: { prefixTokens: 0 } as never },
+      'x/y', 'low', undefined, { useWeb: false, facts: { prefixTokens: 10, inputTokens: 20 } as never },
     );
     const msgs = later.messages as { role: string; content: string }[];
     expect(msgs[0]!.content).toBe('be nice');
     expect(msgs[1]).toEqual({ role: 'system', content: CONTINUITY_NOTE });
     expect(msgs).toHaveLength(5);
+  });
+});
+
+describe('prompt caching', () => {
+  it('writes a cache from turn 1 of a known conversation, from turn 2 otherwise, and for large one-offs', async () => {
+    const { cachePlan } = await import('../src/cache.js');
+    const f = (inputTokens: number, prefixTokens = 0) => ({ inputTokens, prefixTokens }) as never;
+    expect(cachePlan(f(2000), true)).toEqual({ write: true, ttl: '1h' });
+    expect(cachePlan(f(2000), false).write).toBe(false); // one short one-off: no write premium
+    expect(cachePlan(f(3000, 1500), false)).toEqual({ write: true, ttl: '1h' }); // turn 2+
+    expect(cachePlan(f(8000), false)).toEqual({ write: true, ttl: '5m' }); // large one-off
+    expect(cachePlan(f(500), true).write).toBe(false); // below the provider minimum
+  });
+
+  it('derives the same conversation id on every turn, and different ids for different callers', async () => {
+    const { conversationId } = await import('../src/cache.js');
+    const turn1 = [{ role: 'user' as const, content: 'plan my trip' }];
+    const turn3 = [...turn1, { role: 'assistant' as const, content: 'sure' }, { role: 'user' as const, content: 'more' }];
+    expect(conversationId(turn1, 'a')).toBe(conversationId(turn3, 'a'));
+    expect(conversationId(turn1, 'a')).not.toBe(conversationId(turn1, 'b'));
+  });
+
+  it('prices staying on a cached model below switching to an equally priced one', async () => {
+    const { estimateCost } = await import('../src/router/estimate.js');
+    const { buildSeedModels } = await import('../src/db/seed.js');
+    const opus = buildSeedModels().find((m) => m.id === 'anthropic/claude-opus-5.5')!;
+    opus.pricing.cacheWritePerTok = 5e-6;
+    opus.pricing.cacheWrite1hPerTok = 8e-6;
+    const facts = { inputTokens: 40_000, prefixTokens: 38_000 } as never;
+    const tokens = { input: 40_000, output: 500, reasoning: 0 };
+    const stay = estimateCost(opus, tokens, facts, { sticky: true, useWeb: false, cache: { sticky: true, writes: true, ttl: '1h' } });
+    const switchIn = estimateCost(opus, tokens, facts, { sticky: false, useWeb: false, cache: { sticky: false, writes: true, ttl: '1h' } });
+    const noCache = estimateCost(opus, tokens, facts, { sticky: false, useWeb: false });
+    expect(stay).toBeLessThan(noCache / 5);
+    expect(switchIn).toBeGreaterThan(noCache); // switching in pays the full read plus the write premium
   });
 });

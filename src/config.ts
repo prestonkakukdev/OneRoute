@@ -55,6 +55,9 @@ export const config = {
   maxFallbacks: num('ROUTER_MAX_FALLBACKS', 2),
   // Store the first 500 characters of each prompt with its routing decision (useful for tuning).
   storePrompts: process.env.ROUTER_STORE_PROMPTS !== 'false',
+  // Prompt-cache lifetime for conversations on explicit-cache providers (Anthropic). People often pause
+  // longer than 5 minutes between messages, so conversations default to the 1-hour cache.
+  sessionCacheTtl: process.env.ROUTER_CACHE_TTL === '5m' ? '5m' : '1h',
 } as const;
 
 export type Config = typeof config;

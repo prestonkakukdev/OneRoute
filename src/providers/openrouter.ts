@@ -53,6 +53,8 @@ export function parsePricing(raw: Record<string, unknown>): Pricing {
     outputPerTok: output,
     reasoningPerTok: price(raw.internal_reasoning) ?? output,
     cacheReadPerTok: price(raw.input_cache_read),
+    cacheWritePerTok: price(raw.input_cache_write),
+    cacheWrite1hPerTok: price(raw.input_cache_write_1h),
     webSearchPerCall: price(raw.web_search),
     longContext: longContext.length ? longContext : undefined,
   };

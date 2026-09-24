@@ -1,4 +1,5 @@
 import { DatabaseSync } from 'node:sqlite';
+import { config } from '../config.js';
 import type { Dimension, Effort } from '../taxonomy.js';
 import type { ProviderStats } from '../ingest/providerStats.js';
 import type { ModelRecord, RouteDecision, SkillValue, VariantMetrics } from '../types.js';
@@ -135,6 +136,9 @@ export interface OutcomeInput {
   reasoningTokens?: number;
   costUsd?: number;
   fallbacks?: number;
+  cachedTokens?: number; // prompt tokens read from the provider's prompt cache
+  cacheWriteTokens?: number;
+  provider?: string; // upstream provider that served the request
 }
 
 export interface SuccessStat {
@@ -147,7 +151,7 @@ export const statKey = (modelId: string, taskType: string, difficulty: number) =
 const now = () => new Date().toISOString();
 
 // A session stays on its model only while that model's prompt cache is likely still warm.
-const SESSION_TTL_MS = 10 * 60 * 1000;
+const SESSION_TTL_MS = (config.sessionCacheTtl === '1h' ? 55 : 5) * 60 * 1000;
 
 export class Store {
   readonly db: DatabaseSync;
@@ -162,6 +166,9 @@ export class Store {
     this.db.exec(SCHEMA);
     const cols = (this.db.prepare('PRAGMA table_info(outcomes)').all() as Row[]).map((c) => c.name);
     if (!cols.includes('fallbacks')) this.db.exec('ALTER TABLE outcomes ADD COLUMN fallbacks INTEGER');
+    for (const [col, type] of [['cached_tokens', 'INTEGER'], ['cache_write_tokens', 'INTEGER'], ['provider', 'TEXT']] as const) {
+      if (!cols.includes(col)) this.db.exec(`ALTER TABLE outcomes ADD COLUMN ${col} ${type}`);
+    }
     const modelCols = (this.db.prepare('PRAGMA table_info(models)').all() as Row[]).map((c) => c.name);
     if (!modelCols.includes('open_weights')) this.db.exec('ALTER TABLE models ADD COLUMN open_weights INTEGER NOT NULL DEFAULT 0');
     const { n } = this.db.prepare('SELECT COUNT(*) AS n FROM models').get() as { n: number };
@@ -425,8 +432,8 @@ export class Store {
     this.db
       .prepare(
         `INSERT OR REPLACE INTO outcomes (request_id, model_id, effort, status, error, latency_ms, ttft_ms,
-           prompt_tokens, completion_tokens, reasoning_tokens, cost_usd, fallbacks, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           prompt_tokens, completion_tokens, reasoning_tokens, cost_usd, fallbacks, cached_tokens, cache_write_tokens, provider, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         o.requestId,
@@ -441,6 +448,9 @@ export class Store {
         o.reasoningTokens ?? null,
         o.costUsd ?? null,
         o.fallbacks ?? 0,
+        o.cachedTokens ?? null,
+        o.cacheWriteTokens ?? null,
+        o.provider ?? null,
         now(),
       );
   }

@@ -69,6 +69,7 @@ export function resolvePrefs(p: Partial<Omit<RoutePrefs, 'preferences'>> & { pre
     web: p?.web ?? 'auto',
     escalation: p?.escalation ?? 'auto',
     sessionId: p?.sessionId,
+    sessionExplicit: p?.sessionExplicit ?? Boolean(p?.sessionId),
   };
 }
 
@@ -172,6 +173,7 @@ export class Router {
       candidates: [chosen, ...ranked.filter((c) => c !== chosen)].slice(0, 12),
       escalation,
       sessionId: prefs.sessionId,
+      sessionExplicit: prefs.sessionExplicit,
       stickyModel: sticky?.modelId,
       preferences: prefs.preferences,
       needs: requirementWeights(task.taskType.value, task, facts),
