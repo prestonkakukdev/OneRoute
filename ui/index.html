@@ -302,10 +302,12 @@
   <h3>Preferences</h3>
   <div class="muted" style="font-size:13px">These steer how the router trades quality, cost and speed.</div>
   <div class="form">
-    <label for="pQuality">Quality weight</label><input type="number" id="pQuality" min="0" step="0.5" value="1" />
-    <div class="note">Above 1 = pay more for a better answer</div>
-    <label for="pCost">Cost weight</label><input type="number" id="pCost" min="0" step="0.5" value="1" />
-    <label for="pSpeed">Speed weight</label><input type="number" id="pSpeed" min="0" step="0.5" value="1" />
+    <label for="pQuality">Answer quality</label><select id="pQuality" data-weight="quality"></select>
+    <div class="note">How much a better answer is worth to you</div>
+    <label for="pCost">Saving money</label><select id="pCost" data-weight="cost"></select>
+    <div class="note">Matters less = stronger, pricier models are fine</div>
+    <label for="pSpeed">Fast replies</label><select id="pSpeed" data-weight="speed"></select>
+    <div class="note">Matters more = prefer quicker models and lower effort</div>
     <label for="pOpen">Open weights</label>
     <select id="pOpen"><option value="any">Any model</option><option value="prefer">Prefer open-weight</option><option value="only">Open-weight only</option></select>
     <label for="pPrefer">Prefer providers</label><input type="text" id="pPrefer" placeholder="anthropic, google" />
@@ -467,9 +469,9 @@ function toolChip(iconName, text, onRemove) {
 }
 function prefBits() {
   const p = state.prefs, bits = [];
-  if (p.qualityWeight && p.qualityWeight !== 1) bits.push(`quality ×${p.qualityWeight}`);
-  if (p.costWeight && p.costWeight !== 1) bits.push(`cost ×${p.costWeight}`);
-  if (p.speedWeight && p.speedWeight !== 1) bits.push(`speed ×${p.speedWeight}`);
+  if (p.qualityWeight && p.qualityWeight !== 1) bits.push(`quality: ${weightWord(p.qualityWeight).toLowerCase()}`);
+  if (p.costWeight && p.costWeight !== 1) bits.push(`cost: ${weightWord(p.costWeight).toLowerCase()}`);
+  if (p.speedWeight && p.speedWeight !== 1) bits.push(`speed: ${weightWord(p.speedWeight).toLowerCase()}`);
   if (p.openWeights && p.openWeights !== 'any') bits.push(`open: ${p.openWeights}`);
   if (p.preferProviders?.length) bits.push(`prefer ${p.preferProviders.join('/')}`);
   if (p.avoidProviders?.length) bits.push(`avoid ${p.avoidProviders.join('/')}`);
@@ -490,9 +492,16 @@ function syncComposer() {
 
 // ---------- preferences ----------
 const splitList = (s) => s.split(',').map((x) => x.trim()).filter(Boolean);
+// Weights are multipliers on how much each factor counts in the score; shown as plain words.
+const WEIGHT_LEVELS = [[0.25, "Doesn't matter much"], [0.5, 'Matters less'], [1, 'Normal'], [2, 'Matters more'], [4, 'Matters a lot']];
+const weightWord = (v) => WEIGHT_LEVELS.find(([w]) => w === v)?.[1] ?? `custom (×${v})`;
+function fillWeight(sel, value) {
+  const levels = WEIGHT_LEVELS.some(([w]) => w === value) ? WEIGHT_LEVELS : [...WEIGHT_LEVELS, [value, `Custom (×${value})`]].sort((a, b) => a[0] - b[0]);
+  sel.innerHTML = levels.map(([w, t]) => `<option value="${w}" ${w === value ? 'selected' : ''}>${t}</option>`).join('');
+}
 function openPrefs() {
   const p = state.prefs;
-  $('#pQuality').value = p.qualityWeight ?? 1; $('#pCost').value = p.costWeight ?? 1; $('#pSpeed').value = p.speedWeight ?? 1;
+  fillWeight($('#pQuality'), p.qualityWeight ?? 1); fillWeight($('#pCost'), p.costWeight ?? 1); fillWeight($('#pSpeed'), p.speedWeight ?? 1);
   $('#pOpen').value = p.openWeights ?? 'any'; $('#pPrefer').value = (p.preferProviders ?? []).join(', ');
   $('#pAvoid').value = (p.avoidProviders ?? []).join(', '); $('#pMin').value = p.minQuality ?? 0; $('#pKey').value = store.get('key', '');
   $('#prefs').showModal();

@@ -104,8 +104,12 @@ Modes (`cheap` / `balanced` / `best`) set the baseline; preferences steer the op
 
 | Preference | Effect |
 |---|---|
-| `quality_weight` (default 1) | >1 = pay more for a better answer ("sacrifice cost for intelligence") |
-| `cost_weight`, `speed_weight` | >1 = more cost-conscious / more impatient |
+| `quality_weight` (default 1) | How much answer quality counts. >1 = pay more for a better answer ("sacrifice cost for intelligence") |
+| `cost_weight` (default 1) | How much saving money counts. <1 = cost matters less (stronger, pricier models are fine); >1 = more cost-conscious |
+| `speed_weight` (default 1) | How much waiting counts. >1 = prefer faster models and lower effort |
+
+Weights multiply how much each factor counts in the score: 0.5 = half as much, 2 = twice as much. The testing UI shows
+them as plain choices (Doesn't matter much / Matters less / Normal / Matters more / Matters a lot).
 | `open_weights` | `any`, `prefer` (closed models must clearly win), `only` (closed models excluded) |
 | `prefer_providers`, `avoid_providers` | Soft preference, e.g. `["anthropic","google"]` |
 | `min_quality` (0-100) | Never pick a model whose skill for the request is below this |

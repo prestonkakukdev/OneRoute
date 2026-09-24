@@ -59,8 +59,11 @@ export function explainDecision(d: RouteDecision): string {
   return lines.filter((l, i, all) => l !== '' || all[i - 1] !== '').join('\n');
 }
 
+// Weights multiply how much each factor counts: <1 = matters less, >1 = matters more.
+const weightWord = (w: number) => (w === 1 ? 'normal' : w < 1 ? `matters less (x${w})` : `matters more (x${w})`);
+
 export function describePreferences(p: Preferences): string {
-  const parts = [`quality x${p.qualityWeight}`, `cost x${p.costWeight}`, `speed x${p.speedWeight}`];
+  const parts = [`answer quality ${weightWord(p.qualityWeight)}`, `saving money ${weightWord(p.costWeight)}`, `fast replies ${weightWord(p.speedWeight)}`];
   if (p.openWeights !== 'any') parts.push(`open weights: ${p.openWeights}`);
   if (p.preferProviders.length) parts.push(`prefer ${p.preferProviders.join('/')}`);
   if (p.avoidProviders.length) parts.push(`avoid ${p.avoidProviders.join('/')}`);
