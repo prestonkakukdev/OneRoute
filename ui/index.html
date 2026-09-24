@@ -639,14 +639,10 @@ function levels(title, dist, names) {
 }
 function signal(name, p) { return `<span class="chip ${p >= 0.6 ? 'warn' : 'soft'}">${esc(name)} ${pct(p)}</span>`; }
 function webLine(d) {
-  const t = d.task, why = [];
-  if (t.needsWeb >= 0.6) why.push(`needs current info ${pct(t.needsWeb)}`);
-  if ((t.capabilities.web_research ?? 0) >= 0.5) why.push(`web research ${pct(t.capabilities.web_research)} important`);
-  if ((t.taskType.probabilities.research ?? 0) >= 0.6) why.push('research task');
-  const forced = state.prefs.web && state.prefs.web !== 'auto';
-  if (d.useWeb) return `<span class="chip good">${icon('globe')}Web search on</span><span class="muted">${esc(forced ? 'your setting' : why.join(', ') || 'forced on')}</span>`;
-  const reason = d.facts.toolsPresent ? 'the client supplied its own tools' : `needs current info only ${pct(t.needsWeb)}`;
-  return `<span class="chip soft">${icon('globe')}Web search off</span><span class="muted">${esc(forced ? 'your setting' : reason)}</span>`;
+  const reason = d.webReason ?? '';
+  return d.useWeb
+    ? `<span class="chip good">${icon('globe')}Web search on</span><span class="muted">${esc(reason)}</span>`
+    : `<span class="chip soft">${icon('globe')}Web search off</span><span class="muted">${esc(reason)}</span>`;
 }
 
 function renderInspector() {

@@ -215,3 +215,19 @@ describe('configuration errors', () => {
     expect(llm).toHaveBeenCalledTimes(1);
   });
 });
+
+describe('web search decision', () => {
+  it('follows the same web-research weight used to choose the model', async () => {
+    const { webDecision, resolvePrefs } = await import('../src/router/router.js');
+    const { facts } = await import('./fixtures.js');
+    // "dive deep into CRISPR": research 55%, low needs-current-info, modest Jev importance.
+    const task = makeTask({ type: 'research', difficulty: 2, typeP: 0.55, capabilities: { web_research: 0.26 } });
+    task.needsWeb = 0.18;
+    expect(webDecision(task, facts(), resolvePrefs({})).on).toBe(true);
+    const chat = makeTask({ type: 'chat', difficulty: 0 });
+    chat.needsWeb = 0.05;
+    expect(webDecision(chat, facts(), resolvePrefs({})).on).toBe(false);
+    expect(webDecision(task, facts({ toolsPresent: true }), resolvePrefs({})).on).toBe(false);
+    expect(webDecision(chat, facts(), resolvePrefs({ web: 'on' })).reason).toContain('your setting');
+  });
+});

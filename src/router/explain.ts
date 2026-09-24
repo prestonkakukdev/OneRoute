@@ -89,7 +89,7 @@ export function explainWhy(d: RouteDecision): string[] {
   const signals = [
     t.latencySensitive >= 0.6 ? 'the user likely wants a fast reply' : '',
     t.highStakes >= 0.6 ? 'mistakes would be costly' : '',
-    d.useWeb ? 'it needs live web information, so web search is on' : '',
+    d.useWeb ? `web search is on (${d.webReason ?? 'needs live information'})` : '',
     (t.underspecified ?? 0) >= 0.8 ? 'it is too vague to act on, so it is treated as a request for clarification' : '',
   ].filter(Boolean);
   if (signals.length) out.push(`Signals: ${signals.join('; ')}.`);

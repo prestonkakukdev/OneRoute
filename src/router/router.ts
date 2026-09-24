@@ -5,7 +5,8 @@ import { buildJevState, extractFacts, latestUserText } from '../classifier/state
 import { config } from '../config.js';
 import type { Store } from '../db/store.js';
 import { chatCompletion } from '../providers/openrouter.js';
-import type { Candidate, ChatRequest, Escalation, Preferences, RouteDecision, RoutePrefs, TaskProfile } from '../types.js';
+import type { TaskType } from '../taxonomy.js';
+import type { Candidate, ChatRequest, Escalation, Preferences, RequestFacts, RouteDecision, RoutePrefs, TaskProfile } from '../types.js';
 import { conservativePick, escalateWithLlm, escalationReasons } from './escalate.js';
 import { requirementWeights } from './estimate.js';
 import { rankCandidates, successValue } from './optimizer.js';
@@ -71,6 +72,30 @@ export function resolvePrefs(p: Partial<Omit<RoutePrefs, 'preferences'>> & { pre
   };
 }
 
+const WEB_NEEDS_THRESHOLD = 0.6;
+const WEB_RESEARCH_THRESHOLD = 0.5;
+
+// Web search uses the same web-research weight the optimizer scores models with (task-type mix + Jev's
+// importance, averaged over Jev's task-type probabilities), so choosing a model for its research ability
+// and switching the search tool on can never disagree. Also on when the answer needs current information.
+// Skipped when the client brings its own tools: an agent can search itself.
+export function webDecision(task: TaskProfile, facts: RequestFacts, prefs: RoutePrefs): { on: boolean; reason: string } {
+  if (prefs.web === 'on') return { on: true, reason: 'your setting: always' };
+  if (prefs.web === 'off') return { on: false, reason: 'your setting: never' };
+  let research = 0;
+  for (const [type, p] of Object.entries(task.taskType.probabilities) as [TaskType, number][]) {
+    research += p * (requirementWeights(type, task, facts).web_research ?? 0);
+  }
+  const pct = (v: number) => `${Math.round(v * 100)}%`;
+  const reasons = [
+    task.needsWeb >= WEB_NEEDS_THRESHOLD ? `needs current info ${pct(task.needsWeb)}` : '',
+    research >= WEB_RESEARCH_THRESHOLD ? `web research weight ${research.toFixed(2)}` : '',
+  ].filter(Boolean);
+  if (facts.toolsPresent) return { on: false, reason: 'the client supplied its own tools' };
+  if (reasons.length) return { on: true, reason: reasons.join(', ') };
+  return { on: false, reason: `needs current info ${pct(task.needsWeb)}, web research weight ${research.toFixed(2)} (below 0.60 / 0.50)` };
+}
+
 export class Router {
   private readonly deps: RouterDeps;
 
@@ -102,12 +127,8 @@ export class Router {
     // 2. Deterministic optimization over the capability database.
     const models = this.store.listModels();
     const sticky = prefs.sessionId ? this.store.getSession(prefs.sessionId) : undefined;
-    // Auto web search when Jev says the answer needs current information, or the request is clearly a research
-    // task (e.g. "research the effects of X" benefits from current sources even if the topic is not news).
-    // Skipped when the client brings its own tools: an agent can search itself.
-    const wantsWeb =
-      task.needsWeb >= 0.6 || (task.capabilities.web_research ?? 0) >= 0.5 || (task.taskType.probabilities.research ?? 0) >= 0.6;
-    const useWeb = prefs.web === 'on' || (prefs.web === 'auto' && wantsWeb && !facts.toolsPresent);
+    const web = webDecision(task, facts, prefs);
+    const useWeb = web.on;
     const { ranked, rejected } = rankCandidates({
       models,
       task,
@@ -154,6 +175,7 @@ export class Router {
       stickyModel: sticky?.modelId,
       preferences: prefs.preferences,
       needs: requirementWeights(task.taskType.value, task, facts),
+      webReason: web.reason,
       rejected,
       routeMs: performance.now() - started,
     };
