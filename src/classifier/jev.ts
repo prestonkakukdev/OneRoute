@@ -59,7 +59,7 @@ const CORE_QUESTIONS = {
   needs_web: {
     type: 'noul',
     instructions:
-      'Does answering `latest_user_message` well require information that may be newer than a model\'s training data, such as recent events, current prices, or newly released software or docs?',
+      'Does answering `latest_user_message` well require information that may be newer than a model\'s training data, such as recent events, current prices, or newly released software or docs? This includes follow-up questions about recent news or releases discussed earlier in the conversation.',
     criteria: {
       true: 'Needs current or external information from the internet.',
       false: 'Can be answered from general knowledge and the content provided.',

@@ -80,7 +80,11 @@ const WEB_RESEARCH_THRESHOLD = 0.5;
 // importance, averaged over Jev's task-type probabilities), so choosing a model for its research ability
 // and switching the search tool on can never disagree. Also on when the answer needs current information.
 // Skipped when the client brings its own tools: an agent can search itself.
-export function webDecision(task: TaskProfile, facts: RequestFacts, prefs: RoutePrefs): { on: boolean; reason: string } {
+// A follow-up in a conversation that just used web search usually builds on those results ("explain number
+// 4"), so it keeps search on unless Jev says current information is clearly irrelevant ("thanks!").
+const WEB_FOLLOW_UP_THRESHOLD = 0.15;
+
+export function webDecision(task: TaskProfile, facts: RequestFacts, prefs: RoutePrefs, recentWeb = false): { on: boolean; reason: string } {
   if (prefs.web === 'on') return { on: true, reason: 'your setting: always' };
   if (prefs.web === 'off') return { on: false, reason: 'your setting: never' };
   let research = 0;
@@ -91,6 +95,7 @@ export function webDecision(task: TaskProfile, facts: RequestFacts, prefs: Route
   const reasons = [
     task.needsWeb >= WEB_NEEDS_THRESHOLD ? `needs current info ${pct(task.needsWeb)}` : '',
     research >= WEB_RESEARCH_THRESHOLD ? `web research weight ${research.toFixed(2)}` : '',
+    recentWeb && task.needsWeb >= WEB_FOLLOW_UP_THRESHOLD ? 'follow-up to a web-search answer' : '',
   ].filter(Boolean);
   if (facts.toolsPresent) return { on: false, reason: 'the client supplied its own tools' };
   if (reasons.length) return { on: true, reason: reasons.join(', ') };
@@ -128,7 +133,7 @@ export class Router {
     // 2. Deterministic optimization over the capability database.
     const models = this.store.listModels();
     const sticky = prefs.sessionId ? this.store.getSession(prefs.sessionId) : undefined;
-    const web = webDecision(task, facts, prefs);
+    const web = webDecision(task, facts, prefs, sticky?.recentWeb ?? false);
     const useWeb = web.on;
     const { ranked, rejected } = rankCandidates({
       models,
@@ -178,6 +183,7 @@ export class Router {
       preferences: prefs.preferences,
       needs: requirementWeights(task.taskType.value, task, facts),
       webReason: web.reason,
+      recentWeb: sticky?.recentWeb ?? false,
       rejected,
       routeMs: performance.now() - started,
     };

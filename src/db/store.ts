@@ -169,6 +169,8 @@ export class Store {
     for (const [col, type] of [['cached_tokens', 'INTEGER'], ['cache_write_tokens', 'INTEGER'], ['provider', 'TEXT']] as const) {
       if (!cols.includes(col)) this.db.exec(`ALTER TABLE outcomes ADD COLUMN ${col} ${type}`);
     }
+    const sessionCols = (this.db.prepare('PRAGMA table_info(sessions)').all() as Row[]).map((c) => c.name);
+    if (!sessionCols.includes('web_at')) this.db.exec('ALTER TABLE sessions ADD COLUMN web_at TEXT');
     const modelCols = (this.db.prepare('PRAGMA table_info(models)').all() as Row[]).map((c) => c.name);
     if (!modelCols.includes('open_weights')) this.db.exec('ALTER TABLE models ADD COLUMN open_weights INTEGER NOT NULL DEFAULT 0');
     const { n } = this.db.prepare('SELECT COUNT(*) AS n FROM models').get() as { n: number };
@@ -502,21 +504,25 @@ export class Store {
     return out;
   }
 
-  getSession(sessionId: string): { modelId: string; effort: Effort } | undefined {
-    const row = this.db.prepare('SELECT model_id, effort, updated_at FROM sessions WHERE session_id = ?').get(sessionId) as
+  // recentWeb: an earlier turn of this conversation used live web search (within the session lifetime).
+  getSession(sessionId: string): { modelId: string; effort: Effort; recentWeb: boolean } | undefined {
+    const row = this.db.prepare('SELECT model_id, effort, updated_at, web_at FROM sessions WHERE session_id = ?').get(sessionId) as
       | Row
       | undefined;
     if (!row || Date.now() - Date.parse(row.updated_at as string) > SESSION_TTL_MS) return undefined;
-    return { modelId: row.model_id as string, effort: row.effort as Effort };
+    const webAt = row.web_at ? Date.parse(row.web_at as string) : NaN;
+    return { modelId: row.model_id as string, effort: row.effort as Effort, recentWeb: Date.now() - webAt <= SESSION_TTL_MS };
   }
 
-  setSession(sessionId: string, modelId: string, effort: Effort): void {
+  setSession(sessionId: string, modelId: string, effort: Effort, usedWeb = false): void {
+    const at = now();
     this.db
       .prepare(
-        `INSERT INTO sessions (session_id, model_id, effort, updated_at) VALUES (?, ?, ?, ?)
-         ON CONFLICT(session_id) DO UPDATE SET model_id = excluded.model_id, effort = excluded.effort, updated_at = excluded.updated_at`,
+        `INSERT INTO sessions (session_id, model_id, effort, updated_at, web_at) VALUES (?, ?, ?, ?, ?)
+         ON CONFLICT(session_id) DO UPDATE SET model_id = excluded.model_id, effort = excluded.effort,
+           updated_at = excluded.updated_at, web_at = COALESCE(excluded.web_at, sessions.web_at)`,
       )
-      .run(sessionId, modelId, effort, now());
+      .run(sessionId, modelId, effort, at, usedWeb ? at : null);
   }
 
   summary(): Row[] {

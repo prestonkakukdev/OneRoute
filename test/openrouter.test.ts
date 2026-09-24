@@ -49,7 +49,8 @@ describe('upstream request', () => {
 
 describe('multi-model continuity', () => {
   it('always adds the same note right after any system prompt, so the prompt start never changes between turns', async () => {
-    const { CONTINUITY_NOTE } = await import('../src/gateway/execute.js');
+    const { continuityNote } = await import('../src/gateway/execute.js');
+    const CONTINUITY_NOTE = continuityNote();
     const first = buildUpstreamBody({ messages: [{ role: 'user', content: 'hi' }] }, 'x/y', 'low', undefined, { useWeb: false, facts: { prefixTokens: 0, inputTokens: 5 } as never });
     expect((first.messages as { content: string }[])[0]!.content).toBe(CONTINUITY_NOTE);
     const later = buildUpstreamBody(
@@ -60,6 +61,8 @@ describe('multi-model continuity', () => {
     expect(msgs[0]!.content).toBe('be nice');
     expect(msgs[1]).toEqual({ role: 'system', content: CONTINUITY_NOTE });
     expect(msgs).toHaveLength(5);
+    expect(CONTINUITY_NOTE).toContain(`today's date is ${new Date().toISOString().slice(0, 10)}`);
+    expect(continuityNote({ recentWeb: true })).toContain('did use live web search');
   });
 });
 

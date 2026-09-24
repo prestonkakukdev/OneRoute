@@ -229,5 +229,12 @@ describe('web search decision', () => {
     expect(webDecision(chat, facts(), resolvePrefs({})).on).toBe(false);
     expect(webDecision(task, facts({ toolsPresent: true }), resolvePrefs({})).on).toBe(false);
     expect(webDecision(chat, facts(), resolvePrefs({ web: 'on' })).reason).toContain('your setting');
+    // "explain number 4" after a web-search answer keeps search on; "thanks!" does not.
+    const followUp = makeTask({ type: 'extraction', difficulty: 1 });
+    followUp.needsWeb = 0.25;
+    expect(webDecision(followUp, facts(), resolvePrefs({}), true)).toEqual({ on: true, reason: 'follow-up to a web-search answer' });
+    expect(webDecision(followUp, facts(), resolvePrefs({}), false).on).toBe(false);
+    chat.needsWeb = 0.03;
+    expect(webDecision(chat, facts(), resolvePrefs({}), true).on).toBe(false);
   });
 });

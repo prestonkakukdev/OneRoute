@@ -38,23 +38,28 @@ export function reasoningParam(effort: Effort): Record<string, unknown> | undefi
   return { effort };
 }
 
-// Added to routed multi-turn conversations. Different turns can be answered by different models with
-// different tools, so a model must not read a predecessor's web-sourced facts as fabrications. The text is
-// constant (so it never breaks prompt caching) and does not discourage honest statements of limits.
-export const CONTINUITY_NOTE =
-  'Note: this conversation is served by several AI models. Earlier assistant replies may have been written by a ' +
-  'different model, sometimes using live web search, so facts in them can be newer than your training data. Do not ' +
-  'treat such facts as errors or fabrications just because you cannot verify them, and do not apologize for or ' +
-  'retract earlier replies unless the user questions them or they clearly contradict something in this conversation. ' +
-  'If you cannot access information the user needs right now (for example, live web results), say so briefly and ' +
-  'answer as well as you can.';
+// Added to every routed request. Different turns can be answered by different models with different tools,
+// so a model must not read a predecessor's web-sourced facts as fabrications. Stating today's date matters:
+// without it, models assume their training cutoff is "now" and reject newer events. The text changes only
+// once a day and once when a conversation first uses web search, so prompt caching keeps working.
+export function continuityNote(opts: { date?: string; recentWeb?: boolean } = {}): string {
+  const date = opts.date ?? new Date().toISOString().slice(0, 10);
+  return (
+    `Note: today's date is ${date}. This conversation is served by several AI models. Earlier assistant replies may ` +
+    'have been written by a different model, sometimes using live web search, so facts in them can be newer than your ' +
+    'training data. ' +
+    (opts.recentWeb ? 'Earlier replies in this conversation did use live web search results. ' : '') +
+    'Do not treat such facts as errors or fabrications just because you cannot verify them, and do not apologize for or ' +
+    'retract earlier replies unless the user questions them or they clearly contradict something in this conversation. ' +
+    'If you cannot access information the user needs right now (for example, live web results), say so briefly and ' +
+    'answer as well as you can.'
+  );
+}
 
-// Always present (not only once assistant turns exist): the start of the prompt must not change between
-// turns, or the provider's prompt cache from the previous turn cannot be reused.
-function withContinuityNote(messages: ChatMessage[]): ChatMessage[] {
+function withContinuityNote(messages: ChatMessage[], note: string): ChatMessage[] {
   const firstNonSystem = messages.findIndex((m) => m.role !== 'system' && m.role !== 'developer');
   const at = firstNonSystem < 0 ? messages.length : firstNonSystem;
-  return [...messages.slice(0, at), { role: 'system', content: CONTINUITY_NOTE }, ...messages.slice(at)];
+  return [...messages.slice(0, at), { role: 'system', content: note }, ...messages.slice(at)];
 }
 
 export function buildUpstreamBody(
@@ -62,10 +67,11 @@ export function buildUpstreamBody(
   modelId: string,
   effort: Effort,
   model: ModelRecord | undefined,
-  decision: Pick<RouteDecision, 'useWeb' | 'facts'> & Partial<Pick<RouteDecision, 'sessionId' | 'sessionExplicit'>>,
+  decision: Pick<RouteDecision, 'useWeb' | 'facts'> & Partial<Pick<RouteDecision, 'sessionId' | 'sessionExplicit' | 'recentWeb'>>,
 ): Record<string, unknown> {
   const { router: _router, ...rest } = req;
-  const body: Record<string, unknown> = { ...rest, messages: withContinuityNote(req.messages), model: modelId, usage: { include: true } };
+  const note = continuityNote({ recentWeb: decision.recentWeb });
+  const body: Record<string, unknown> = { ...rest, messages: withContinuityNote(req.messages, note), model: modelId, usage: { include: true } };
   const reasoning = reasoningParam(effort);
   if (reasoning) body.reasoning = reasoning;
   else delete body.reasoning;
@@ -234,7 +240,7 @@ export class Executor {
     const generationMs = latencyMs - (ttftMs ?? model?.ttftMs ?? 0);
     const tps = usage?.completion_tokens && generationMs > 200 ? usage.completion_tokens / (generationMs / 1000) : undefined;
     this.store.updatePerformance(modelId, ttftMs, tps);
-    if (decision.sessionId) this.store.setSession(decision.sessionId, modelId, effort);
+    if (decision.sessionId) this.store.setSession(decision.sessionId, modelId, effort, decision.useWeb);
   }
 }
 

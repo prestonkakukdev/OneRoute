@@ -158,6 +158,7 @@ export interface RouteDecision {
   preferences?: Preferences;
   needs?: Partial<Record<Capability, number>>; // requirement weights for the most likely task type
   webReason?: string; // why web search was switched on or off
+  recentWeb?: boolean; // an earlier turn of this conversation used web search
   rejected?: Record<string, string>; // model -> reason it failed a hard requirement
   routeMs: number;
 }
