@@ -7,6 +7,13 @@
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500&display=swap" rel="stylesheet" />
+<!-- Markdown, math and code rendering for answers (the page falls back to plain text if these fail to load) -->
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.18.9/dist/katex.min.css" />
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@highlightjs/cdn-assets@11.12.0/styles/github-dark.min.css" />
+<script defer src="https://cdn.jsdelivr.net/npm/marked@18.0.14/lib/marked.umd.js"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/dompurify@3.4.16/dist/purify.min.js"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.18.9/dist/katex.min.js"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/@highlightjs/cdn-assets@11.12.0/highlight.min.js"></script>
 <style>
   /* Design tokens: neutral dark theme (shadcn-style), adapted from the Motoko AI prompt input. */
   :root {
@@ -87,8 +94,35 @@
   .msg.assistant.selected { background: var(--muted-2); box-shadow: inset 0 0 0 1px var(--border); }
   .msg-head { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 4px 0 8px; font-size: 12px; color: var(--muted-foreground); }
   .msg-head .meta { margin-left: auto; font-variant-numeric: tabular-nums; }
-  .msg-body { white-space: pre-wrap; word-wrap: break-word; font-size: 15px; line-height: 1.7; padding: 0 2px; }
-  .msg-body pre { background: var(--popover); border: 1px solid var(--border); padding: 12px 14px; border-radius: 12px; overflow-x: auto; white-space: pre; line-height: 1.55; }
+  .msg-body { word-wrap: break-word; font-size: 15px; line-height: 1.7; padding: 0 2px; }
+  .msg-body .plain { white-space: pre-wrap; }
+  .msg-body pre { background: var(--popover); border: 1px solid var(--border); padding: 12px 14px; border-radius: 12px; overflow-x: auto; white-space: pre; line-height: 1.55; margin: 12px 0; }
+  .msg-body pre code.hljs { background: transparent; padding: 0; }
+  /* Markdown structure from model answers */
+  .msg-body > :first-child { margin-top: 0; }
+  .msg-body > :last-child { margin-bottom: 0; }
+  .msg-body p { margin: 0 0 12px; }
+  .msg-body h1, .msg-body h2, .msg-body h3, .msg-body h4, .msg-body h5, .msg-body h6 { color: var(--foreground); font-weight: 600; letter-spacing: -0.01em; line-height: 1.35; margin: 22px 0 8px; }
+  .msg-body h1 { font-size: 22px; } .msg-body h2 { font-size: 19px; } .msg-body h3 { font-size: 16.5px; }
+  .msg-body h4, .msg-body h5, .msg-body h6 { font-size: 15px; color: var(--muted-foreground); }
+  .msg-body h1 + *, .msg-body h2 + *, .msg-body h3 + * { margin-top: 0; }
+  .msg-body ul, .msg-body ol { margin: 0 0 12px; padding-left: 24px; }
+  .msg-body li { margin: 3px 0; }
+  .msg-body li > p { margin: 0 0 6px; }
+  .msg-body li > ul, .msg-body li > ol { margin: 4px 0 0; }
+  .msg-body li::marker { color: var(--muted-foreground); }
+  .msg-body blockquote { margin: 0 0 12px; padding: 2px 14px; border-left: 3px solid var(--border); color: var(--muted-foreground); }
+  .msg-body hr { border: 0; border-top: 1px solid var(--border); margin: 20px 0; }
+  .msg-body a { color: var(--foreground); text-decoration: underline; text-decoration-color: var(--muted-foreground-70); text-underline-offset: 2px; }
+  .msg-body a:hover { text-decoration-color: var(--foreground); }
+  .msg-body strong { font-weight: 600; color: var(--foreground); }
+  .msg-body table { border-collapse: collapse; margin: 0 0 12px; font-size: 14px; display: block; overflow-x: auto; max-width: 100%; }
+  .msg-body th, .msg-body td { border: 1px solid var(--border); padding: 6px 10px; text-align: left; vertical-align: top; }
+  .msg-body th { background: var(--muted); font-weight: 600; }
+  .msg-body img { max-width: 100%; border-radius: 10px; }
+  .msg-body input[type="checkbox"] { margin-right: 6px; }
+  .msg-body .katex { font-size: 1.05em; }
+  .msg-body .katex-display { margin: 12px 0; overflow-x: auto; overflow-y: hidden; padding: 2px 0; }
   .msg-body code { font-family: "Geist Mono", ui-monospace, Menlo, monospace; font-size: 13px; }
   .msg-body :not(pre) > code { background: var(--muted); padding: 1px 5px; border-radius: 6px; }
   .sources { margin-top: 12px; display: flex; flex-wrap: wrap; gap: 6px; white-space: normal; }
@@ -399,11 +433,43 @@ const secs = (v) => (v === undefined || v === null ? '–' : `${v.toFixed(1)}s`)
 const short = (id) => (id || '').split('/')[1] || id;
 const label = (k) => String(k).replace(/_/g, ' ');
 
+// Answers are Markdown (headings, lists, tables, code) with LaTeX math. Math is pulled out before Markdown
+// parsing (so `_` and `\` inside formulas survive), code spans are left alone, and the HTML is sanitized.
+const MATH_RE = /(```[\s\S]*?(?:```|$)|`[^`\n]*`)|\$\$([\s\S]+?)\$\$|\\\[([\s\S]+?)\\\]|\\\(([\s\S]+?)\\\)|(?<![\\$\w])\$(?![\s$])([^$\n]+?)(?<![\s\\])\$(?!\d)/g;
+let markdownReady = false;
+function setupMarkdown() {
+  if (markdownReady || !window.marked || !window.DOMPurify) return markdownReady;
+  marked.use({
+    gfm: true,
+    renderer: {
+      code({ text, lang }) {
+        const l = (lang || '').split(/\s/)[0];
+        const html = window.hljs && l && hljs.getLanguage(l) ? hljs.highlight(text, { language: l, ignoreIllegals: true }).value : esc(text);
+        return `<pre><code class="hljs${l ? ` language-${esc(l)}` : ''}">${html}</code></pre>`;
+      },
+    },
+  });
+  DOMPurify.addHook('afterSanitizeAttributes', (node) => {
+    if (node.tagName === 'A') { node.setAttribute('target', '_blank'); node.setAttribute('rel', 'noopener noreferrer'); }
+  });
+  return (markdownReady = true);
+}
+function renderMath(tex, display) {
+  if (!window.katex) return esc(display ? `$$${tex}$$` : `$${tex}$`);
+  try { return katex.renderToString(tex, { displayMode: display, throwOnError: false, output: 'html' }); }
+  catch { return esc(tex); }
+}
 function renderMarkdown(text) {
-  return String(text).split(/```/).map((p, i) => {
-    if (i % 2 === 1) return `<pre><code>${esc(p.replace(/^[a-zA-Z0-9_+-]*\n/, '').replace(/\n+$/, ''))}</code></pre>`;
-    return esc(i > 0 ? p.replace(/^\n/, '') : p).replace(/\n$/, '').replace(/`([^`]+)`/g, '<code>$1</code>').replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>');
-  }).join('');
+  if (!setupMarkdown()) return `<div class="plain">${esc(text)}</div>`;
+  const math = [];
+  const src = String(text).replace(MATH_RE, (m, code, dd, br, pa, inl) => {
+    if (code !== undefined) return m;
+    const display = dd !== undefined || br !== undefined;
+    math.push(renderMath((dd ?? br ?? pa ?? inl).trim(), display));
+    return `MATHPH${math.length - 1}X`;
+  });
+  const html = DOMPurify.sanitize(marked.parse(src));
+  return html.replace(/MATHPH(\d+)X/g, (_, i) => math[+i] ?? '');
 }
 
 // ---------- menus ----------
@@ -607,7 +673,7 @@ async function send() {
       else if (event === 'delta') turn.answer += data.text;
       else if (event === 'done') turn.done = data;
       else if (event === 'error') turn.error = data.message + (data.status === 402 ? '\n\nOpenRouter needs credits for real answers. Turn on "Route only" in the + menu to keep testing routing for free.' : '');
-      renderTurn(turn);
+      if (event === 'delta') scheduleRender(turn); else renderTurn(turn);
       if (state.selected === index && event !== 'delta') renderInspector();
       if (atBottom) scroller.scrollTop = scroller.scrollHeight;
     });
@@ -761,6 +827,16 @@ document.addEventListener('drop', (e) => {
 });
 
 // ---------- rendering ----------
+// Streaming answers are re-parsed as Markdown at most once per frame.
+function scheduleRender(t) {
+  if (t.frame) return;
+  t.frame = requestAnimationFrame(() => {
+    t.frame = 0;
+    const sc = $('#messages'), atBottom = sc.scrollHeight - sc.scrollTop - sc.clientHeight < 80;
+    renderTurn(t);
+    if (atBottom) sc.scrollTop = sc.scrollHeight;
+  });
+}
 function renderTurn(t) {
   const d = t.decision, c = d?.candidates?.[0];
   const head = d

@@ -198,6 +198,11 @@ export function createApp(store: Store, router: Router, executor = new Executor(
     ),
   );
 
+  // The lab renders Markdown and LaTeX; saying so keeps formatting consistent whichever model answers.
+  const FORMAT_NOTE =
+    'Your reply is shown in a chat interface that renders Markdown (headings, lists, tables, code blocks) and LaTeX math between $...$ or $$...$$. Use that structure where it helps readability; keep short answers short.';
+  const withFormatNote = <T extends { role: string }>(messages: T[]) =>
+    messages.some((m) => m.role === 'system') ? messages : [{ role: 'system', content: FORMAT_NOTE } as unknown as T, ...messages];
   // Text, images (data URLs) and files (PDFs as data URLs); text files are sent inline as text parts.
   const uiPart = z.union([
     z.object({ type: z.literal('text'), text: z.string() }),
@@ -232,7 +237,7 @@ export function createApp(store: Store, router: Router, executor = new Executor(
     const parsed = uiChatSchema.safeParse(await c.req.json().catch(() => null));
     if (!parsed.success) return openAiError(c, 400, parsed.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; '));
     const b = parsed.data;
-    const req: ChatRequest = { messages: b.messages, stream: true };
+    const req: ChatRequest = { messages: withFormatNote(b.messages), stream: true };
     return streamSSE(c, async (sse) => {
       const send = (event: string, data: unknown) => sse.writeSSE({ event, data: JSON.stringify(data) });
       let decision;
