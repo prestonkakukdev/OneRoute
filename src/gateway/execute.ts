@@ -76,10 +76,14 @@ export function buildUpstreamBody(
   const reasoning = reasoningParam(effort);
   if (reasoning) body.reasoning = reasoning;
   else delete body.reasoning;
-  if (decision.useWeb) {
-    const plugins = Array.isArray(req.plugins) ? (req.plugins as unknown[]) : [];
-    body.plugins = [...plugins, { id: 'web' }];
+  const plugins = Array.isArray(req.plugins) ? [...(req.plugins as unknown[])] : [];
+  if (decision.useWeb) plugins.push({ id: 'web' });
+  // Models without native PDF input get the text extracted for free (OpenRouter's default is paid OCR).
+  const parsesPdf = plugins.some((p) => (p as { id?: string }).id === 'file-parser');
+  if (decision.facts.hasFiles && !parsesPdf && model && !model.inputModalities.includes('file')) {
+    plugins.push({ id: 'file-parser', pdf: { engine: 'cloudflare-ai' } });
   }
+  if (plugins.length) body.plugins = plugins;
   if (model?.provider === 'anthropic') addAnthropicCacheBreakpoints(body, decision.facts, cachePlan(decision.facts, Boolean(decision.sessionId) && decision.sessionExplicit !== false));
   return body;
 }

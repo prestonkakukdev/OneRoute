@@ -39,8 +39,9 @@ export function observeAnswer(
     store.addCalibration(model.id, 'output', '*', r);
     store.addCalibration(model.id, 'output', String(task.outputLength.value), r);
   }
-  // Billed prompt tokens vs the router's own count (web requests excluded: results inflate the prompt).
-  if (!actual.useWeb && facts.inputTokens > 0) {
+  // Billed prompt tokens vs the router's own count (web results and attachments excluded: providers count
+  // those very differently, so they would blur the tokenizer difference this measures).
+  if (!actual.useWeb && !facts.hasImages && !facts.hasFiles && !facts.hasAudio && facts.inputTokens > 0) {
     store.addCalibration(model.id, 'input', '*', clamp(actual.promptTokens / (facts.inputTokens + ROUTER_OVERHEAD_TOKENS)));
   }
   if (raw.reasoning > 0 && actual.reasoningTokens !== undefined) {

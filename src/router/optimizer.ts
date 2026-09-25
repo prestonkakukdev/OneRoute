@@ -22,7 +22,6 @@ export function rejectionReason(model: ModelRecord, facts: RequestFacts, prefs: 
   if (prefs.preferences.openWeights === 'only' && !model.openWeights) return 'closed weights (open-weights only)';
   if (facts.inputTokens + MIN_OUTPUT_ROOM > model.contextLength) return 'context window too small';
   if (facts.hasImages && !model.inputModalities.includes('image')) return 'no image input';
-  if (facts.hasFiles && !model.inputModalities.includes('file')) return 'no file input';
   if (facts.hasAudio && !model.inputModalities.includes('audio')) return 'no audio input';
   if (facts.toolsPresent && !model.supportedParams.includes('tools')) return 'no tool calling';
   if (facts.jsonSchemaRequired && !model.supportedParams.includes('structured_outputs')) return 'no structured outputs';
@@ -65,6 +64,8 @@ export interface RankInput {
 
 // A rejected answer's model is only re-chosen at a clearly higher effort, or if it is far ahead.
 const RETRY_PENALTY = 0.5;
+// Models without native PDF input get the PDF as extracted text (figures, scans and layout are lost).
+const PARSED_PDF_PENALTY = 0.1;
 
 // Staying on the conversation's model gets a small edge (fraction of the request's value) on top of the
 // cache savings, so near-ties do not make the router bounce between models from turn to turn.
@@ -112,6 +113,7 @@ export function rankCandidates(input: RankInput): { ranked: Candidate[]; rejecte
         preference:
           preferencePenalty(model, prefs, requestValue) -
           (sticky ? STAY_BONUS * requestValue : 0) +
+          (facts.hasFiles && !model.inputModalities.includes('file') ? PARSED_PDF_PENALTY * requestValue : 0) +
           (input.retry?.modelId === model.id && EFFORTS.indexOf(effort as never) <= EFFORTS.indexOf(input.retry.effort as never) ? RETRY_PENALTY * requestValue : 0),
       };
       ranked.push({

@@ -198,8 +198,16 @@ export function createApp(store: Store, router: Router, executor = new Executor(
     ),
   );
 
+  // Text, images (data URLs) and files (PDFs as data URLs); text files are sent inline as text parts.
+  const uiPart = z.union([
+    z.object({ type: z.literal('text'), text: z.string() }),
+    z.object({ type: z.literal('image_url'), image_url: z.object({ url: z.string() }) }),
+    z.object({ type: z.literal('file'), file: z.object({ filename: z.string(), file_data: z.string() }) }),
+  ]);
   const uiChatSchema = z.object({
-    messages: z.array(z.object({ role: z.enum(['system', 'user', 'assistant']), content: z.string() })).min(1),
+    messages: z
+      .array(z.object({ role: z.enum(['system', 'user', 'assistant']), content: z.union([z.string(), z.array(uiPart).min(1)]) }))
+      .min(1),
     mode: z.enum(MODES).optional(),
     preferences: z
       .object({

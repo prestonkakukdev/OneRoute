@@ -109,6 +109,8 @@ export interface RequestFacts {
   toolsPresent: boolean;
   jsonSchemaRequired: boolean;
   requestedMaxTokens?: number;
+  // What is attached across the conversation (PDF pages estimated from the files).
+  attachments?: { images: number; pdfs: number; pdfPages: number; files: number };
 }
 
 // User preferences that steer the optimizer (not Jev). Weights default to 1; the mode sets the baseline.

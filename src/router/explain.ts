@@ -43,7 +43,7 @@ export function explainDecision(d: RouteDecision): string {
       .map(([k, v]) => `${k} ${v.toFixed(2)}`)
       .join(', ')}`,
     `  needs web ${pct(t.needsWeb)} · latency-sensitive ${pct(t.latencySensitive)} · high stakes ${pct(t.highStakes)}`,
-    `  input ~${d.facts.inputTokens} tokens${d.facts.hasImages ? ' · images' : ''}${d.facts.toolsPresent ? ' · tools' : ''}${d.facts.jsonSchemaRequired ? ' · json schema' : ''}`,
+    `  input ~${d.facts.inputTokens} tokens${d.facts.hasImages ? ' · images' : ''}${d.facts.hasFiles ? ' · files' : ''}${d.facts.toolsPresent ? ' · tools' : ''}${d.facts.jsonSchemaRequired ? ' · json schema' : ''}`,
     '',
     'Top candidates (score = P(success) x value + quality premium - cost - latency penalty - preference penalty)',
     ...d.candidates.slice(0, 8).map((c, i) => {

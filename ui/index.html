@@ -134,6 +134,27 @@
   @keyframes iconIn { from { opacity: 0; transform: scale(.25); filter: blur(4px); } to { opacity: 1; transform: none; filter: none; } }
   .spin { animation: spin 1s linear infinite !important; }
   @keyframes spin { to { transform: rotate(360deg); } }
+  /* ---------- attachments ---------- */
+  .attachments { display: flex; flex-wrap: wrap; gap: 8px; padding: 0 2px; margin-bottom: 10px; }
+  .attachments:empty { display: none; }
+  .att { position: relative; display: flex; align-items: center; gap: 8px; height: 56px; border-radius: 14px; background: var(--muted); box-shadow: var(--chip-inset); animation: pop .3s var(--ease); max-width: 240px; }
+  .att.img { width: 56px; overflow: hidden; }
+  .att.img img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .att.doc { padding: 0 30px 0 10px; }
+  .att .ico { display: grid; place-items: center; width: 34px; height: 34px; border-radius: 10px; background: var(--popover); color: var(--muted-foreground); flex-shrink: 0; }
+  .att .ico svg { width: 16px; height: 16px; }
+  .att .meta { min-width: 0; display: flex; flex-direction: column; line-height: 1.3; }
+  .att .meta b { font-weight: 500; font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .att .meta span { font-size: 11.5px; color: var(--muted-foreground-70); }
+  .att .rm { position: absolute; top: 4px; right: 4px; display: grid; place-items: center; width: 20px; height: 20px; border-radius: 999px; border: 0; padding: 0;
+    background: rgba(0, 0, 0, .65); color: #fff; opacity: .85; transition: opacity .15s var(--ease); }
+  .att .rm:hover { opacity: 1; }
+  .att .rm svg { width: 12px; height: 12px; }
+  .msg.user .attachments { margin: 0 0 6px; padding: 0; justify-content: flex-end; }
+  .msg.user .att { background: var(--popover); }
+  .composer.dragging { box-shadow: 0 0 0 2px var(--foreground), 0 16px 48px -12px rgba(0, 0, 0, .7); }
+  .attach-error { color: var(--bad); font-size: 12px; padding: 0 4px 8px; }
+  .attach-error:empty { display: none; }
   .hint { text-align: center; font-size: 11.5px; color: var(--muted-foreground-70); margin-top: 8px; }
 
   /* ---------- popover menus ---------- */
@@ -256,6 +277,9 @@
       <div class="composer-wrap">
         <form class="composer" id="composer">
           <div class="active-tools" id="activeTools"></div>
+          <div class="attachments" id="attachments"></div>
+          <div class="attach-error" id="attachError" role="alert"></div>
+          <input type="file" id="fileInput" multiple hidden />
           <div class="field">
             <div class="placeholder" id="placeholder" aria-hidden="true"></div>
             <textarea id="input" rows="1" aria-label="Message" maxlength="20000"></textarea>
@@ -263,6 +287,7 @@
           <div class="toolbar">
             <div class="left">
               <button type="button" class="ghost icon-btn plus" id="plusBtn" aria-haspopup="menu" aria-expanded="false" aria-label="Open actions"><span data-icon="plus"></span></button>
+              <button type="button" class="ghost icon-btn" id="attachBtn" aria-label="Attach files" title="Attach images, PDFs or text files"><span data-icon="paperclip"></span></button>
               <button type="button" class="ghost selector" id="modeBtn" aria-haspopup="listbox" aria-expanded="false" aria-label="Routing mode">
                 <span class="value" id="modeValue"></span><span data-icon="chevron"></span>
               </button>
@@ -270,7 +295,7 @@
             <button type="submit" class="send" id="send" aria-label="Send message"></button>
           </div>
         </form>
-        <div class="hint">Enter to send · Shift+Enter for a new line</div>
+        <div class="hint">Enter to send · Shift+Enter for a new line · drop or paste images, PDFs and text files</div>
       </div>
     </section>
     <aside class="inspector" id="inspector"></aside>
@@ -284,6 +309,8 @@
     <div class="seg-mini" id="webSeg">
       <button type="button" data-web="auto">Auto</button><button type="button" data-web="on">Always</button><button type="button" data-web="off">Never</button>
     </div>
+    <button type="button" class="menu-item" role="menuitem" id="attachItem"><span data-icon="paperclip"></span><span class="grow">Attach files<span class="sub">Images, PDFs, code and text files</span></span></button>
+    <div class="menu-sep"></div>
     <button type="button" class="menu-item" role="menuitemcheckbox" id="dryRunItem"><span data-icon="route"></span><span class="grow">Route only<span class="sub">Show the decision, don't call a model</span></span><span class="check-slot"></span></button>
     <button type="button" class="menu-item" role="menuitemcheckbox" id="escItem"><span data-icon="telescope"></span><span class="grow">Escalation<span class="sub">Ask a second LLM when Jev is unsure</span></span><span class="check-slot"></span></button>
     <div class="menu-sep"></div>
@@ -331,6 +358,9 @@ const ICONS = {
   loader: '<path d="M21 12a9 9 0 1 1-6.219-8.56"/>',
   check: '<path d="M20 6 9 17l-5-5"/>',
   x: '<path d="M18 6 6 18"/><path d="m6 6 12 12"/>',
+  paperclip: '<path d="m16 6-8.414 8.586a2 2 0 0 0 2.829 2.829l8.414-8.586a4 4 0 1 0-5.657-5.657l-8.379 8.551a6 6 0 1 0 8.485 8.485l8.379-8.551"/>',
+  file: '<path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="M10 9H8"/><path d="M16 13H8"/><path d="M16 17H8"/>',
+  code: '<path d="m16 18 6-6-6-6"/><path d="m8 6-6 6 6 6"/>',
   globe: '<circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/><path d="M2 12h20"/>',
   route: '<circle cx="6" cy="19" r="3"/><path d="M9 19h8.5a3.5 3.5 0 0 0 0-7h-11a3.5 3.5 0 0 1 0-7H15"/><circle cx="18" cy="5" r="3"/>',
   telescope: '<path d="m10.065 12.493-6.18 1.318a.934.934 0 0 1-1.108-.702l-.537-2.15a1.07 1.07 0 0 1 .691-1.265l13.504-4.44"/><path d="m13.56 11.747 4.332-.924"/><path d="m16 21-3.105-6.21"/><path d="M16.485 5.94a2 2 0 0 1 1.455-2.425l1.09-.272a1 1 0 0 1 1.212.727l1.515 6.06a1 1 0 0 1-.727 1.213l-1.09.272a2 2 0 0 1-2.425-1.455z"/><path d="m6.158 8.633 1.114 4.456"/><path d="m8 21 3.105-6.21"/><circle cx="12" cy="13" r="2"/>',
@@ -359,6 +389,7 @@ const state = {
   escalation: store.get('escalation', true),
   sessionId: crypto.randomUUID(),
   history: [], turns: [], selected: -1, busy: false,
+  attachments: [], // pending for the next message: { kind: 'image'|'pdf'|'text', name, size, dataUrl?, text?, pages? }
 };
 
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -454,7 +485,7 @@ $('#composer').addEventListener('submit', (e) => { e.preventDefault(); send(); }
 let sendIconState = '';
 function syncSend() {
   const btn = $('#send');
-  btn.classList.toggle('ready', input.value.trim().length > 0 || state.busy);
+  btn.classList.toggle('ready', input.value.trim().length > 0 || state.attachments.length > 0 || state.busy);
   const next = state.busy ? 'busy' : 'idle';
   if (next !== sendIconState) { btn.innerHTML = state.busy ? icon('loader', 'spin') : icon('arrowUp'); sendIconState = next; }
   btn.setAttribute('aria-label', state.busy ? 'Sending' : 'Send message');
@@ -521,26 +552,35 @@ $('#prefsReset').addEventListener('click', () => { state.prefs = { web: state.pr
 const emptyEl = $('#empty');
 emptyEl.querySelectorAll('.suggestions button').forEach((b) => b.addEventListener('click', () => { input.value = b.textContent; autosize(); send(); }));
 function newChat() {
-  state.sessionId = crypto.randomUUID(); state.history = []; state.turns = []; state.selected = -1;
+  state.sessionId = crypto.randomUUID(); state.history = []; state.turns = []; state.selected = -1; state.attachments = []; renderAttachments();
   $('#thread').innerHTML = ''; $('#thread').append(emptyEl); $('#sessionChip').textContent = 'new session';
   renderInspector(); input.focus();
 }
 
 async function send() {
   const text = input.value.trim();
-  if (!text || state.busy) return;
+  const files = state.attachments;
+  if ((!text && !files.length) || state.busy) return;
+  const content = buildContent(text, files);
+  if (historyBytes() + JSON.stringify(content).length > MAX_REQUEST_BYTES) {
+    $('#attachError').textContent = 'This conversation is too large to send (attachments are re-sent every turn). Remove an attachment or start a new chat.';
+    return;
+  }
   input.value = ''; autosize(); showPlaceholder();
+  state.attachments = []; renderAttachments();
   emptyEl.remove();
   state.busy = true; syncSend();
 
   const userEl = document.createElement('div');
-  userEl.className = 'msg user'; userEl.textContent = text;
+  userEl.className = 'msg user';
+  if (files.length) { const row = document.createElement('div'); row.className = 'attachments'; files.forEach((f) => row.append(attachmentTile(f))); userEl.append(row); }
+  if (text) userEl.append(document.createTextNode(text));
   $('#thread').append(userEl);
-  state.history.push({ role: 'user', content: text });
+  state.history.push({ role: 'user', content });
   const turns = state.history.filter((m) => m.role === 'user').length;
   $('#sessionChip').textContent = `${turns} turn${turns > 1 ? 's' : ''}`;
 
-  const turn = { prompt: text, decision: null, why: [], answer: '', done: null, error: null, thinking: false, dryRun: state.dryRun, feedback: null };
+  const turn = { prompt: text || files.map((f) => f.name).join(', '), decision: null, why: [], answer: '', done: null, error: null, thinking: false, dryRun: state.dryRun, feedback: null };
   state.turns.push(turn);
   const index = state.turns.length - 1;
   const el = document.createElement('div');
@@ -598,6 +638,128 @@ async function readEvents(body, onEvent) {
   }
 }
 
+// ---------- attachments ----------
+const MAX_ATTACHMENTS = 10;
+const MAX_REQUEST_BYTES = 30 * 1024 * 1024; // the server accepts 32 MB per request
+const MAX_PDF_BYTES = 20 * 1024 * 1024;
+const MAX_TEXT_BYTES = 1024 * 1024;
+const IMAGE_MAX_EDGE = 2048; // providers downscale beyond this anyway
+const IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/webp', 'image/gif'];
+const fileInput = $('#fileInput');
+const kb = (n) => (n < 1024 * 1024 ? `${Math.max(1, Math.round(n / 1024))} KB` : `${(n / 1024 / 1024).toFixed(1)} MB`);
+const historyBytes = () => JSON.stringify(state.history).length;
+
+function readAs(file, how) {
+  return new Promise((resolve, reject) => {
+    const r = new FileReader();
+    r.onload = () => resolve(r.result); r.onerror = () => reject(r.error);
+    how === 'text' ? r.readAsText(file) : how === 'buffer' ? r.readAsArrayBuffer(file) : r.readAsDataURL(file);
+  });
+}
+function loadImage(src) {
+  return new Promise((resolve, reject) => { const img = new Image(); img.onload = () => resolve(img); img.onerror = () => reject(new Error('unreadable image')); img.src = src; });
+}
+// Large photos are scaled down before sending: smaller uploads, same result (providers downscale them anyway).
+async function prepareImage(file) {
+  const dataUrl = await readAs(file, 'url');
+  const img = await loadImage(dataUrl);
+  const scale = Math.min(1, IMAGE_MAX_EDGE / Math.max(img.width, img.height));
+  if (scale === 1 && file.size <= 4 * 1024 * 1024 && file.type !== 'image/gif') return { dataUrl, w: img.width, h: img.height };
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.round(img.width * scale); canvas.height = Math.round(img.height * scale);
+  canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
+  const type = file.type === 'image/png' && file.size < 4 * 1024 * 1024 ? 'image/png' : 'image/jpeg';
+  return { dataUrl: canvas.toDataURL(type, 0.9), w: canvas.width, h: canvas.height };
+}
+function countPdfPages(buffer) {
+  const text = new TextDecoder('latin1').decode(buffer);
+  const objects = (text.match(/\/Type\s*\/Page(?![s\w])/g) || []).length;
+  let count = 0;
+  for (const m of text.matchAll(/\/Type\s*\/Pages\b[^>]*?\/Count\s+(\d+)|\/Count\s+(\d+)[^>]*?\/Type\s*\/Pages\b/g)) count = Math.max(count, +(m[1] ?? m[2]));
+  return Math.max(objects, count) || undefined;
+}
+const looksBinary = (s) => /\u0000/.test(s.slice(0, 8000));
+
+async function addFiles(list) {
+  const errors = [];
+  for (const file of list) {
+    if (state.attachments.length >= MAX_ATTACHMENTS) { errors.push(`Up to ${MAX_ATTACHMENTS} attachments per message.`); break; }
+    try {
+      if (IMAGE_TYPES.includes(file.type)) {
+        const { dataUrl, w, h } = await prepareImage(file);
+        state.attachments.push({ kind: 'image', name: file.name || 'pasted image', size: Math.round(dataUrl.length * 0.75), dataUrl, detail: `${w}×${h}` });
+      } else if (file.type === 'application/pdf' || /\.pdf$/i.test(file.name)) {
+        if (file.size > MAX_PDF_BYTES) { errors.push(`${file.name} is larger than 20 MB.`); continue; }
+        const pages = countPdfPages(await readAs(file, 'buffer'));
+        state.attachments.push({ kind: 'pdf', name: file.name, size: file.size, dataUrl: await readAs(file, 'url'), pages });
+      } else if (file.type.startsWith('image/')) {
+        errors.push(`${file.name}: only PNG, JPEG, WebP and GIF images are supported.`);
+      } else {
+        if (file.size > MAX_TEXT_BYTES) { errors.push(`${file.name} is larger than 1 MB of text.`); continue; }
+        const text = await readAs(file, 'text');
+        if (looksBinary(text)) { errors.push(`${file.name}: not a text file (supported: images, PDFs, code and text files).`); continue; }
+        state.attachments.push({ kind: 'text', name: file.name, size: file.size, text });
+      }
+    } catch (err) { errors.push(`${file.name}: ${err.message}`); }
+  }
+  $('#attachError').textContent = errors.join(' ');
+  renderAttachments();
+}
+
+// OpenAI-style content parts: images and PDFs as data URLs; text files inline so every model can read them.
+function buildContent(text, files) {
+  if (!files.length) return text;
+  const parts = [];
+  if (text) parts.push({ type: 'text', text });
+  for (const f of files) {
+    if (f.kind === 'image') parts.push({ type: 'image_url', image_url: { url: f.dataUrl } });
+    else if (f.kind === 'pdf') parts.push({ type: 'file', file: { filename: f.name, file_data: f.dataUrl } });
+    else parts.push({ type: 'text', text: `<file name="${f.name.replace(/"/g, "'")}">\n${f.text}\n</file>` });
+  }
+  return parts;
+}
+
+function attachmentTile(f, onRemove) {
+  const el = document.createElement('div');
+  if (f.kind === 'image') {
+    el.className = 'att img'; el.title = `${f.name} · ${f.detail ?? ''} · ${kb(f.size)}`;
+    const img = document.createElement('img'); img.src = f.dataUrl; img.alt = f.name; el.append(img);
+  } else {
+    el.className = 'att doc'; el.title = f.name;
+    const sub = f.kind === 'pdf' ? `PDF${f.pages ? ` · ${f.pages} page${f.pages > 1 ? 's' : ''}` : ''} · ${kb(f.size)}` : `${(f.name.split('.').pop() || 'text').toUpperCase()} · ${kb(f.size)}`;
+    el.innerHTML = `<span class="ico">${icon(f.kind === 'pdf' ? 'file' : 'code')}</span><span class="meta"><b>${esc(f.name)}</b><span>${esc(sub)}</span></span>`;
+  }
+  if (onRemove) {
+    const x = document.createElement('button');
+    x.type = 'button'; x.className = 'rm'; x.setAttribute('aria-label', `Remove ${f.name}`); x.innerHTML = icon('x');
+    x.addEventListener('click', onRemove); el.append(x);
+  }
+  return el;
+}
+function renderAttachments() {
+  const row = $('#attachments'); row.innerHTML = '';
+  state.attachments.forEach((f, i) => row.append(attachmentTile(f, () => { state.attachments.splice(i, 1); $('#attachError').textContent = ''; renderAttachments(); })));
+  syncSend();
+}
+
+$('#attachBtn').addEventListener('click', () => fileInput.click());
+$('#attachItem').addEventListener('click', () => { closeMenus(); fileInput.click(); });
+fileInput.addEventListener('change', () => { addFiles([...fileInput.files]); fileInput.value = ''; });
+input.addEventListener('paste', (e) => {
+  const files = [...(e.clipboardData?.files ?? [])];
+  if (files.length) { e.preventDefault(); addFiles(files); }
+});
+const composerEl = $('#composer');
+let dragDepth = 0;
+document.addEventListener('dragenter', (e) => { if (e.dataTransfer?.types.includes('Files')) { dragDepth++; composerEl.classList.add('dragging'); } });
+document.addEventListener('dragleave', () => { if (--dragDepth <= 0) { dragDepth = 0; composerEl.classList.remove('dragging'); } });
+document.addEventListener('dragover', (e) => { if (e.dataTransfer?.types.includes('Files')) e.preventDefault(); });
+document.addEventListener('drop', (e) => {
+  if (!e.dataTransfer?.files.length) return;
+  e.preventDefault(); dragDepth = 0; composerEl.classList.remove('dragging');
+  addFiles([...e.dataTransfer.files]); input.focus();
+});
+
 // ---------- rendering ----------
 function renderTurn(t) {
   const d = t.decision, c = d?.candidates?.[0];
@@ -636,6 +798,15 @@ function levels(title, dist, names) {
     return `<div class="cell ${isTop ? 'top' : ''}" title="${esc(name)}: ${pct(p)}"><div class="col ${isTop ? 'top' : ''}"><div style="height:${p * 100}%"></div></div><span>${esc(name)}</span></div>`;
   }).join('');
   return `<div class="row" style="--n:${names.length}"><span>${esc(title)}</span>${cells}</div>`;
+}
+function attachChips(f) {
+  const a = f.attachments;
+  if (!a) return f.hasImages ? '<span class="chip soft">images</span>' : '';
+  const bits = [];
+  if (a.images) bits.push(`${a.images} image${a.images > 1 ? 's' : ''}`);
+  if (a.pdfs) bits.push(`${a.pdfs} PDF${a.pdfs > 1 ? 's' : ''}${a.pdfPages ? ` (${a.pdfPages} pages)` : ''}`);
+  if (a.files) bits.push(`${a.files} file${a.files > 1 ? 's' : ''}`);
+  return bits.map((b) => `<span class="chip soft">${icon('paperclip')}${esc(b)}</span>`).join('');
 }
 function signal(name, p) { return `<span class="chip ${p >= 0.6 ? 'warn' : 'soft'}">${esc(name)} ${pct(p)}</span>`; }
 function webLine(d) {
@@ -700,7 +871,7 @@ function renderInspector() {
       <div class="panel-title"><span class="label">What the router looked for</span></div>
       <div class="muted" style="font-size:12px;margin-bottom:10px">Capability weights used to score models (task mix + Jev + request facts). The weakest weighted capability counts most.</div>
       ${bars(sorted(d.needs), { max: Math.max(...Object.values(d.needs ?? { a: 1 })), fmt: (v) => v.toFixed(2) })}
-      <div class="row-chips"><span class="chip soft">~${d.facts.inputTokens.toLocaleString()} input tokens</span>${d.facts.hasImages ? '<span class="chip soft">images</span>' : ''}${d.facts.toolsPresent ? '<span class="chip soft">tools</span>' : ''}${d.stickyModel ? `<span class="chip">sticky: ${esc(short(d.stickyModel))}</span>` : ''}</div>
+      <div class="row-chips"><span class="chip soft">~${d.facts.inputTokens.toLocaleString()} input tokens</span>${attachChips(d.facts)}${d.facts.toolsPresent ? '<span class="chip soft">tools</span>' : ''}${d.stickyModel ? `<span class="chip">sticky: ${esc(short(d.stickyModel))}</span>` : ''}</div>
     </div>
     <div class="panel">
       <div class="panel-title"><span class="label">Top candidates</span><span class="muted" style="font-size:11px">value + quality − cost − time − preference</span></div>

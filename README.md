@@ -47,6 +47,10 @@ a plain-English "why this model", the top candidates with a score breakdown (val
 preference penalties), models ruled out, and the actual cost and time once the answer finishes. Rate answers with 👍/👎
 (this feeds the learning loop). Tick **Route only** to test routing without calling a model.
 
+**Attachments:** click the paperclip, or drop or paste files into the chat. Supported: images (PNG, JPEG, WebP, GIF;
+large photos are scaled down to 2048px first), PDFs (up to 20 MB) and any text or code file (up to 1 MB, sent inline so
+every model can read it). Attachments stay in the conversation, so follow-up questions can refer to them.
+
 ## Use it
 
 ```bash
@@ -86,6 +90,12 @@ const res = await client.chat.completions.create({ model: 'auto:best', messages:
 Optional `router` fields: `mode`, `max_cost_usd`, `max_latency_s`, `allow_models`, `deny_models`,
 `web` (`auto`/`on`/`off`), `escalation` (`auto`/`off`), `session_id` (keeps a conversation on one model, so its prompt cache is reused).
 Set `ROUTER_API_KEY` to require a bearer token.
+
+Attachments use the OpenAI content-part format: `{"type": "image_url", "image_url": {"url": "data:image/png;base64,..."}}`
+and `{"type": "file", "file": {"filename": "report.pdf", "file_data": "data:application/pdf;base64,..."}}`. Images
+only go to models that accept images. PDFs go to any model: models that read PDFs natively see the pages (text, figures
+and scans); for the rest, the router asks OpenRouter to extract the text for free (OpenRouter's default would be paid OCR)
+and scores them slightly lower. Prompt size is estimated from the actual image dimensions and PDF page counts.
 
 ## How the pieces fit
 

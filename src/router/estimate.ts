@@ -45,7 +45,14 @@ export function requirementWeights(type: TaskType, task: TaskProfile, facts?: Re
   for (const [cap, importance] of Object.entries(task.capabilities) as [Capability, number][]) {
     // Operating a GUI only matters when the job is to act (agentic); Jev tends to over-rate it for
     // requests that merely mention screenshots, browsers or research.
-    const gate = cap === 'computer_use' ? 0.3 + 0.7 * (task.taskType.probabilities.agentic ?? 0) : 1;
+    // Two more Jev over-ratings the router can check against facts: long-context skill when the input is
+    // actually short (Jev sees attachment names, not their size), and tool use when no tools were supplied.
+    const agentic = 0.3 + 0.7 * (task.taskType.probabilities.agentic ?? 0);
+    const gate =
+      cap === 'computer_use' ? agentic
+      : cap === 'long_context' && facts ? Math.min(1, 0.15 + facts.inputTokens / LONG_CONTEXT_TOKENS)
+      : cap === 'agentic_tool_use' && facts && !facts.toolsPresent ? agentic
+      : 1;
     w[cap] = (w[cap] ?? 0) + importance * gate;
   }
   if (facts) {

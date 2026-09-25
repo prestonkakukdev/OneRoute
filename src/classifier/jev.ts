@@ -88,7 +88,7 @@ const CORE_QUESTIONS = {
   underspecified: {
     type: 'noul',
     instructions:
-      'Is `latest_user_message` too vague to act on even with the earlier conversation, e.g. it refers to code, files or a problem that were never provided, so the right reply is a clarifying question?',
+      'Is `latest_user_message` too vague to act on even with the earlier conversation, e.g. it refers to code, files or a problem that were never provided, so the right reply is a clarifying question? Files and images listed in `attachments` WERE provided (the model will see their contents; you only see their names).',
   },
 } as const;
 
