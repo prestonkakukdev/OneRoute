@@ -113,6 +113,17 @@ CREATE TABLE IF NOT EXISTS outcomes (
   feedback_at TEXT,
   created_at TEXT NOT NULL
 );
+-- Learned correction factors for the estimator: running sum of log(actual / estimated) per model
+-- (and effort for reasoning); applied as exp(sum / (n + prior)) so few samples barely move it.
+CREATE TABLE IF NOT EXISTS calibration (
+  model_id TEXT NOT NULL,
+  metric TEXT NOT NULL,
+  effort TEXT NOT NULL,
+  sum_log REAL NOT NULL,
+  n INTEGER NOT NULL,
+  updated_at TEXT NOT NULL,
+  PRIMARY KEY (model_id, metric, effort)
+);
 CREATE TABLE IF NOT EXISTS sessions (
   session_id TEXT PRIMARY KEY,
   model_id TEXT NOT NULL,
@@ -150,6 +161,12 @@ export const statKey = (modelId: string, taskType: string, difficulty: number) =
 
 const now = () => new Date().toISOString();
 
+// Feedback inferred from the next message is less certain than an explicit rating.
+export const IMPLICIT_FEEDBACK_WEIGHT = 0.5;
+
+// Calibration factors are shrunk toward 1 as if there were this many neutral observations.
+export const CALIBRATION_PRIOR = 5;
+
 // A session stays on its model only while that model's prompt cache is likely still warm.
 const SESSION_TTL_MS = (config.sessionCacheTtl === '1h' ? 55 : 5) * 60 * 1000;
 
@@ -166,9 +183,11 @@ export class Store {
     this.db.exec(SCHEMA);
     const cols = (this.db.prepare('PRAGMA table_info(outcomes)').all() as Row[]).map((c) => c.name);
     if (!cols.includes('fallbacks')) this.db.exec('ALTER TABLE outcomes ADD COLUMN fallbacks INTEGER');
-    for (const [col, type] of [['cached_tokens', 'INTEGER'], ['cache_write_tokens', 'INTEGER'], ['provider', 'TEXT']] as const) {
+    for (const [col, type] of [['cached_tokens', 'INTEGER'], ['cache_write_tokens', 'INTEGER'], ['provider', 'TEXT'], ['feedback_source', 'TEXT']] as const) {
       if (!cols.includes(col)) this.db.exec(`ALTER TABLE outcomes ADD COLUMN ${col} ${type}`);
     }
+    const decisionCols = (this.db.prepare('PRAGMA table_info(decisions)').all() as Row[]).map((c) => c.name);
+    if (!decisionCols.includes('use_web')) this.db.exec('ALTER TABLE decisions ADD COLUMN use_web INTEGER');
     const sessionCols = (this.db.prepare('PRAGMA table_info(sessions)').all() as Row[]).map((c) => c.name);
     if (!sessionCols.includes('web_at')) this.db.exec('ALTER TABLE sessions ADD COLUMN web_at TEXT');
     const modelCols = (this.db.prepare('PRAGMA table_info(models)').all() as Row[]).map((c) => c.name);
@@ -331,6 +350,20 @@ export class Store {
     const skillRows = this.db.prepare('SELECT * FROM skills').all() as Row[];
     const metricRows = this.db.prepare('SELECT * FROM variant_metrics').all() as Row[];
     const statRows = new Map((this.db.prepare('SELECT * FROM provider_stats').all() as Row[]).map((p) => [p.model_id as string, p]));
+    const calib = new Map<string, NonNullable<ModelRecord['calibration']>>();
+    for (const c of this.calibrationRows()) {
+      const entry = calib.get(c.model_id) ?? { reasoning: {}, samples: 0 };
+      const factor = Math.exp(c.sum_log / (c.n + CALIBRATION_PRIOR));
+      if (c.metric === 'output' && c.effort === '*') {
+        entry.output = factor;
+        entry.samples = Math.max(entry.samples, c.n);
+      } else if (c.metric === 'output') (entry.outputByLength ??= {})[c.effort] = factor;
+      else if (c.metric === 'input') entry.input = factor;
+      else if (c.metric === 'latency') entry.latency = factor;
+      else if (c.metric === 'web') entry.web = factor;
+      else if (c.metric === 'reasoning') entry.reasoning[c.effort as Effort | '*'] = factor;
+      calib.set(c.model_id, entry);
+    }
     const profileRows = new Map(
       (this.db.prepare('SELECT model_id, text FROM profiles').all() as Row[]).map((p) => [p.model_id as string, p.text as string]),
     );
@@ -386,6 +419,13 @@ export class Store {
         variantSkills,
         variantMetrics,
         profile: profileRows.get(r.id as string),
+        // Web-search size is mostly a property of the search, so models without their own data use the
+        // average across all models ('*').
+        calibration: (() => {
+          const own = calib.get(r.id as string);
+          const web = own?.web ?? calib.get('*')?.web;
+          return own || web !== undefined ? { reasoning: {}, samples: 0, ...own, web } : undefined;
+        })(),
         providerStats: (() => {
           const p = statRows.get(r.id as string);
           return p
@@ -409,8 +449,8 @@ export class Store {
     this.db
       .prepare(
         `INSERT OR REPLACE INTO decisions (request_id, created_at, session_id, mode, model_id, effort, task_type,
-           difficulty, task, facts, candidates, escalation, query_excerpt, route_ms)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           difficulty, task, facts, candidates, escalation, query_excerpt, route_ms, use_web)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         d.requestId,
@@ -427,6 +467,7 @@ export class Store {
         d.escalation ? JSON.stringify(d.escalation) : null,
         queryExcerpt.slice(0, 500),
         d.routeMs,
+        d.useWeb ? 1 : 0,
       );
   }
 
@@ -461,9 +502,54 @@ export class Store {
   recordFeedback(requestId: string, success: boolean, score?: number, comment?: string): boolean {
     this.statsCache = undefined;
     const res = this.db
-      .prepare('UPDATE outcomes SET success = ?, feedback_score = ?, feedback_comment = ?, feedback_at = ? WHERE request_id = ?')
+      .prepare(
+        `UPDATE outcomes SET success = ?, feedback_score = ?, feedback_comment = ?, feedback_at = ?, feedback_source = 'user'
+         WHERE request_id = ?`,
+      )
       .run(success ? 1 : 0, score ?? null, comment ?? null, now(), requestId);
     return res.changes > 0;
+  }
+
+  // Feedback inferred from the user's next message; never overrides a rating the user gave themselves.
+  recordImplicitFeedback(requestId: string, success: boolean, comment: string): boolean {
+    this.statsCache = undefined;
+    const res = this.db
+      .prepare(
+        `UPDATE outcomes SET success = ?, feedback_comment = ?, feedback_at = ?, feedback_source = 'implicit'
+         WHERE request_id = ? AND status = 'ok' AND (feedback_source IS NULL OR feedback_source = 'implicit')`,
+      )
+      .run(success ? 1 : 0, comment, now(), requestId);
+    return res.changes > 0;
+  }
+
+  // The most recent answered request of a conversation (the "previous answer" of the next turn).
+  lastAnswered(sessionId: string): { requestId: string; modelId: string; effort: Effort } | undefined {
+    const row = this.db
+      .prepare(
+        `SELECT o.request_id, o.model_id, o.effort FROM outcomes o JOIN decisions d ON d.request_id = o.request_id
+         WHERE d.session_id = ? AND o.status = 'ok' ORDER BY d.created_at DESC LIMIT 1`,
+      )
+      .get(sessionId) as Row | undefined;
+    return row ? { requestId: row.request_id as string, modelId: row.model_id as string, effort: row.effort as Effort } : undefined;
+  }
+
+  addCalibration(modelId: string, metric: string, effort: string, ratio: number): void {
+    this.invalidate();
+    this.db
+      .prepare(
+        `INSERT INTO calibration (model_id, metric, effort, sum_log, n, updated_at) VALUES (?, ?, ?, ?, 1, ?)
+         ON CONFLICT(model_id, metric, effort) DO UPDATE SET sum_log = sum_log + excluded.sum_log, n = n + 1, updated_at = excluded.updated_at`,
+      )
+      .run(modelId, metric, effort, Math.log(ratio), now());
+  }
+
+  resetCalibration(): void {
+    this.invalidate();
+    this.db.exec('DELETE FROM calibration');
+  }
+
+  calibrationRows(): { model_id: string; metric: string; effort: string; sum_log: number; n: number }[] {
+    return this.db.prepare('SELECT model_id, metric, effort, sum_log, n FROM calibration ORDER BY model_id, metric, effort').all() as never;
   }
 
   // Exponential moving average of measured speed, so the latency model tracks reality.
@@ -487,8 +573,9 @@ export class Store {
     const rows = this.db
       .prepare(
         `SELECT o.model_id AS model_id, d.task_type AS task_type, d.difficulty AS difficulty,
-                SUM(CASE WHEN o.success = 1 THEN 1 ELSE 0 END) AS successes, COUNT(*) AS trials
-         FROM outcomes o JOIN decisions d ON d.request_id = o.request_id
+                SUM(CASE WHEN o.success = 1 THEN w ELSE 0 END) AS successes, SUM(w) AS trials
+         FROM (SELECT *, CASE feedback_source WHEN 'implicit' THEN ${IMPLICIT_FEEDBACK_WEIGHT} ELSE 1.0 END AS w FROM outcomes) o
+         JOIN decisions d ON d.request_id = o.request_id
          WHERE o.success IS NOT NULL
          GROUP BY o.model_id, d.task_type, d.difficulty`,
       )

@@ -137,7 +137,14 @@ export function explainWhy(d: RouteDecision): string[] {
       `A higher effort (${higher.effort}) would raise success to ~${pct(higher.pSuccess)} for ${usd(higher.estCostUsd - win.estCostUsd)} more and ${(higher.estLatencyS - win.estLatencyS).toFixed(1)}s longer, which was not worth it here.`,
     );
   }
-  if (d.stickyModel) out.push(`This conversation was on ${short(d.stickyModel)}; staying on it is cheaper because its cached history can be reused.`);
+  if (d.implicitFeedback) {
+    out.push(
+      d.implicitFeedback.success
+        ? `Your message confirms the previous answer (${short(d.implicitFeedback.modelId)}) worked; recorded as 👍 for learning.`
+        : `Your message says the previous answer (${short(d.implicitFeedback.modelId)}) was wrong; recorded as 👎 for learning, and this retry avoids repeating it at the same effort.`,
+    );
+  }
+  if (d.stickyModel && d.implicitFeedback?.success !== false) out.push(`This conversation was on ${short(d.stickyModel)}; staying on it is cheaper because its cached history can be reused.`);
   if (d.escalation) out.push(`Escalated (${d.escalation.by}): ${d.escalation.reasons.join('; ')}. ${d.escalation.rationale ?? ''}`);
   return out;
 }

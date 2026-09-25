@@ -1,4 +1,5 @@
 import type { Store } from '../db/store.js';
+import { observeAnswer } from '../learning/calibration.js';
 import { chatCompletion, ConfigError } from '../providers/openrouter.js';
 import { config } from '../config.js';
 import type { Effort } from '../taxonomy.js';
@@ -236,6 +237,18 @@ export class Executor {
       provider,
     });
     if (error) return;
+    // Learn how this model's real answers differ from the estimate (length, thinking, time).
+    if (model && usage?.completion_tokens !== undefined && usage.prompt_tokens !== undefined) {
+      observeAnswer(this.store, model, effort, decision.task, decision.facts, {
+        promptTokens: usage.prompt_tokens,
+        completionTokens: usage.completion_tokens,
+        reasoningTokens: usage.completion_tokens_details?.reasoning_tokens,
+        cachedTokens: usage.prompt_tokens_details?.cached_tokens,
+        latencyMs,
+        useWeb: decision.useWeb,
+        costUsd: usage.cost,
+      });
+    }
     // Learn real speed. Without a measured first-token time, assume the current estimate.
     const generationMs = latencyMs - (ttftMs ?? model?.ttftMs ?? 0);
     const tps = usage?.completion_tokens && generationMs > 200 ? usage.completion_tokens / (generationMs / 1000) : undefined;

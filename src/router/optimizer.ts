@@ -1,4 +1,4 @@
-import { DIFFICULTY_VALUE, jobSizeMultiplier, MODE_WEIGHTS, PREFERENCE_STRENGTH, QUALITY_FLOOR_RATIO } from '../taxonomy.js';
+import { DIFFICULTY_VALUE, EFFORTS, jobSizeMultiplier, MODE_WEIGHTS, PREFERENCE_STRENGTH, QUALITY_FLOOR_RATIO, type Effort } from '../taxonomy.js';
 import type { Candidate, ModelRecord, RequestFacts, RoutePrefs, TaskProfile } from '../types.js';
 import { cachePlan } from '../cache.js';
 import {
@@ -59,7 +59,12 @@ export interface RankInput {
   learning: LearningOptions;
   stickyModelId?: string;
   useWeb: boolean;
+  // The user said the previous answer (this model at this effort) was wrong: don't just repeat it.
+  retry?: { modelId: string; effort: Effort };
 }
+
+// A rejected answer's model is only re-chosen at a clearly higher effort, or if it is far ahead.
+const RETRY_PENALTY = 0.5;
 
 // Staying on the conversation's model gets a small edge (fraction of the request's value) on top of the
 // cache savings, so near-ties do not make the router bounce between models from turn to turn.
@@ -104,7 +109,10 @@ export function rankCandidates(input: RankInput): { ranked: Candidate[]; rejecte
         quality: (premium * success.skill) / 100,
         cost: pref.costWeight * estCostUsd,
         latency: estLatencyS * latencyPrice,
-        preference: preferencePenalty(model, prefs, requestValue) - (sticky ? STAY_BONUS * requestValue : 0),
+        preference:
+          preferencePenalty(model, prefs, requestValue) -
+          (sticky ? STAY_BONUS * requestValue : 0) +
+          (input.retry?.modelId === model.id && EFFORTS.indexOf(effort as never) <= EFFORTS.indexOf(input.retry.effort as never) ? RETRY_PENALTY * requestValue : 0),
       };
       ranked.push({
         modelId: model.id,

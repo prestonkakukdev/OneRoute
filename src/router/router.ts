@@ -5,7 +5,7 @@ import { buildJevState, extractFacts, latestUserText } from '../classifier/state
 import { config } from '../config.js';
 import type { Store } from '../db/store.js';
 import { chatCompletion } from '../providers/openrouter.js';
-import type { TaskType } from '../taxonomy.js';
+import type { Effort, TaskType } from '../taxonomy.js';
 import type { Candidate, ChatRequest, Escalation, Preferences, RequestFacts, RouteDecision, RoutePrefs, TaskProfile } from '../types.js';
 import { conservativePick, escalateWithLlm, escalationReasons } from './escalate.js';
 import { requirementWeights } from './estimate.js';
@@ -17,6 +17,8 @@ export interface RouterDeps {
 }
 
 const SHORTLIST_SIZE = 5;
+const IMPLICIT_REJECT_THRESHOLD = 0.75;
+const IMPLICIT_CONFIRM_THRESHOLD = 0.8;
 const UNDERSPECIFIED_THRESHOLD = 0.8;
 
 function asClarification(task: TaskProfile): TaskProfile {
@@ -130,6 +132,26 @@ export class Router {
     // Not when tools are available: an agent can go and find the missing context itself.
     if ((task.underspecified ?? 0) >= UNDERSPECIFIED_THRESHOLD && !facts.toolsPresent) task = asClarification(task);
 
+    // Feedback hidden in this message about the previous answer ("that's wrong" / "that worked"): recorded for
+    // learning, and a rejected answer is retried with a stronger option instead of the same model.
+    let retry: { modelId: string; effort: Effort } | undefined;
+    let implicitFeedback: RouteDecision['implicitFeedback'];
+    const previous = prefs.sessionId && facts.prefixTokens > 0 ? this.store.lastAnswered(prefs.sessionId) : undefined;
+    if (previous) {
+      const rejected = (task.previousRejected ?? 0) >= IMPLICIT_REJECT_THRESHOLD;
+      const confirmed = !rejected && (task.previousConfirmed ?? 0) >= IMPLICIT_CONFIRM_THRESHOLD;
+      if (rejected || confirmed) {
+        const note = rejected ? `user said the answer was wrong: "${text.slice(0, 200)}"` : `user confirmed it worked: "${text.slice(0, 200)}"`;
+        if (this.store.recordImplicitFeedback(previous.requestId, confirmed, note)) {
+          implicitFeedback = { requestId: previous.requestId, modelId: previous.modelId, success: confirmed };
+        }
+      }
+      if (rejected) {
+        retry = { modelId: previous.modelId, effort: previous.effort };
+        task = { ...task, highStakes: Math.max(task.highStakes, 0.8) };
+      }
+    }
+
     // 2. Deterministic optimization over the capability database.
     const models = this.store.listModels();
     const sticky = prefs.sessionId ? this.store.getSession(prefs.sessionId) : undefined;
@@ -141,7 +163,8 @@ export class Router {
       facts,
       prefs,
       useWeb,
-      stickyModelId: sticky?.modelId,
+      stickyModelId: retry ? undefined : sticky?.modelId,
+      retry,
       learning: { stats: this.store.successStats(), priorStrength: config.priorStrength, exploration: config.exploration },
     });
 
@@ -184,6 +207,7 @@ export class Router {
       needs: requirementWeights(task.taskType.value, task, facts),
       webReason: web.reason,
       recentWeb: sticky?.recentWeb ?? false,
+      implicitFeedback,
       rejected,
       routeMs: performance.now() - started,
     };

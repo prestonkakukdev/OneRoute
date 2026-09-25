@@ -9,7 +9,8 @@ import { Command, InvalidArgumentError } from 'commander';
 import { buildJevState, extractFacts } from '../classifier/state.js';
 import { classifyWithJev } from '../classifier/jev.js';
 import { config } from '../config.js';
-import { Store } from '../db/store.js';
+import { CALIBRATION_PRIOR, Store } from '../db/store.js';
+import { rebuildCalibration } from '../learning/calibration.js';
 import { syncFromOpenRouter } from '../db/sync.js';
 import { fetchAaModels, type AaModel } from '../ingest/aa.js';
 import { arenaResults, fetchArenaCategory, LMARENA_CATEGORIES } from '../ingest/lmarena.js';
@@ -446,6 +447,26 @@ program
     const store = new Store(config.dbPath);
     const ok = store.recordFeedback(requestId, verdict === 'good', undefined, comment.join(' ') || undefined);
     console.log(ok ? 'recorded' : red(`unknown request ${requestId}`));
+    store.close();
+  });
+
+program
+  .command('calibrate')
+  .description('Rebuild the learned estimate corrections (answer length, thinking, time) from all recorded answers')
+  .action(() => {
+    const store = new Store(config.dbPath);
+    const { answers, models } = rebuildCalibration(store);
+    console.log(`learned from ${answers} answers across ${models} models`);
+    const byModel = new Map<string, string[]>();
+    for (const r of store.calibrationRows()) {
+      const factor = Math.exp(r.sum_log / (r.n + CALIBRATION_PRIOR));
+      const label =
+        r.metric === 'reasoning' ? `thinking@${r.effort}` : r.metric === 'output' ? 'answer length' : r.metric === 'web' ? 'web overhead' : r.metric === 'input' ? 'prompt size' : 'time';
+      if ((r.metric === 'reasoning' || r.metric === 'output') && r.effort !== '*' && r.metric !== 'reasoning') continue;
+      if (r.metric === 'reasoning' && r.effort === '*') continue;
+      byModel.set(r.model_id, [...(byModel.get(r.model_id) ?? []), `${label} x${factor.toFixed(2)} (n=${r.n})`]);
+    }
+    for (const [m, parts] of byModel) console.log(`  ${m.padEnd(34)} ${parts.join(' · ')}`);
     store.close();
   });
 

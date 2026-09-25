@@ -75,6 +75,16 @@ const CORE_QUESTIONS = {
     instructions:
       'Would a wrong or sloppy answer be costly, e.g. production code, legal, medical or financial decisions, or an important document?',
   },
+  previous_rejected: {
+    type: 'noul',
+    instructions:
+      'Does `latest_user_message` say that `previous_assistant_reply` was wrong, did not work, or was not what they asked for (e.g. "that is wrong", "no, I meant...", "that did not fix it")? If there is no previous reply, answer no.',
+  },
+  previous_confirmed: {
+    type: 'noul',
+    instructions:
+      'Does `latest_user_message` confirm that `previous_assistant_reply` was correct or worked (e.g. "that worked", "perfect, exactly what I needed")? Politeness alone ("thanks") is not confirmation. If there is no previous reply, answer no.',
+  },
   underspecified: {
     type: 'noul',
     instructions:
@@ -110,6 +120,8 @@ export const jevResponseSchema = z.object({
       latency_sensitive: noulAnswer,
       high_stakes: noulAnswer,
       underspecified: noulAnswer.optional(),
+      previous_rejected: noulAnswer.optional(),
+      previous_confirmed: noulAnswer.optional(),
     })
     .catchall(z.union([choiceAnswer, scoreAnswer, noulAnswer])),
 });
@@ -153,6 +165,8 @@ export function toTaskProfile(res: JevResponse, latencyMs: number): TaskProfile 
     latencySensitive: a.latency_sensitive.noul,
     highStakes: a.high_stakes.noul,
     underspecified: a.underspecified?.noul ?? 0,
+    previousRejected: a.previous_rejected?.noul ?? 0,
+    previousConfirmed: a.previous_confirmed?.noul ?? 0,
     source: 'jev',
     latencyMs,
   };

@@ -220,10 +220,19 @@ export function metricsFor(model: ModelRecord, effort: Effort): { tps: number; t
 
 const LIVE_STATS_FULL_WEIGHT_REQUESTS = 2000;
 
-// Search results that OpenRouter's web plugin adds to the prompt (measured: ~8K tokens).
-export const WEB_CONTEXT_TOKENS = 8000;
+// Search results that OpenRouter's web plugin adds to the prompt. Measured on real requests: ~14K tokens
+// (5 results); refined per model by calibration.
+export const WEB_CONTEXT_TOKENS = 14000;
+// The router's own additions to every prompt (the cross-model continuity note).
+export const ROUTER_OVERHEAD_TOKENS = 150;
 
-export function estimateTokens(task: TaskProfile, effort: Effort, facts: RequestFacts, model?: ModelRecord) {
+export function estimateTokens(
+  task: TaskProfile,
+  effort: Effort,
+  facts: RequestFacts,
+  model?: ModelRecord,
+  opts: { calibrated?: boolean } = {},
+) {
   let output = 0;
   for (const [level, p] of Object.entries(task.outputLength.probabilities)) {
     output += (OUTPUT_TOKENS_BY_LEVEL[Number(level)] ?? 0) * p;
@@ -243,7 +252,16 @@ export function estimateTokens(task: TaskProfile, effort: Effort, facts: Request
       : measured !== undefined && measured > 0
         ? measured * (scale / REF_DIFFICULTY_SCALE) * (depthScale / REF_DEPTH_SCALE)
         : REASONING_TOKENS[effort] * scale * depthScale;
-  return { input: facts.inputTokens, output: Math.round(output), reasoning: Math.round(reasoning) };
+  // Learned from this model's real answers (answer length and thinking at this effort).
+  const c = opts.calibrated === false ? undefined : model?.calibration;
+  const outFactor = c?.outputByLength?.[String(task.outputLength.value)] ?? c?.output ?? 1;
+  const reasonFactor = c?.reasoning[effort] ?? c?.reasoning['*'] ?? 1;
+  const calibratedOutput = facts.requestedMaxTokens ? Math.min(output * outFactor, facts.requestedMaxTokens) : output * outFactor;
+  return {
+    input: Math.round(facts.inputTokens * (c?.input ?? 1)),
+    output: Math.round(calibratedOutput),
+    reasoning: Math.round(reasoning * reasonFactor),
+  };
 }
 
 // Prompt-cache accounting: the session's current model reads the conversation so far from its cache; any
@@ -275,19 +293,25 @@ export function estimateCost(
   const cacheRead = tier?.cacheReadPerTok ?? p.cacheReadPerTok;
   // Staying on the session's model lets the conversation prefix be read from the prompt cache.
   const cached = opts.sticky && cacheRead !== undefined ? Math.min(facts.prefixTokens, tokens.input) : 0;
-  const webTokens = opts.useWeb ? WEB_CONTEXT_TOKENS : 0;
+  // Web search overhead (injected results and/or per-search fees, which differ by provider), in dollars,
+  // corrected per model from real web-search answers.
+  const webCost = opts.useWeb ? webOverheadUsd(model, inputPrice) * (model.calibration?.web ?? 1) : 0;
   // Tokens newly written to an explicit cache cost the write price instead of the input price.
   const explicit = model.provider === 'anthropic' && p.cacheWritePerTok !== undefined;
   const writePrice = opts.cache?.ttl === '1h' ? (p.cacheWrite1hPerTok ?? p.cacheWritePerTok) : p.cacheWritePerTok;
   const freshPrice = explicit && opts.cache?.writes && writePrice !== undefined ? writePrice : inputPrice;
   return (
     cached * cacheRead! +
-    (tokens.input - cached) * freshPrice +
-    webTokens * inputPrice +
+    (tokens.input - cached + ROUTER_OVERHEAD_TOKENS) * freshPrice +
+    webCost +
     tokens.output * outputPrice +
-    tokens.reasoning * reasoningPrice +
-    (opts.useWeb ? (p.webSearchPerCall ?? 0.02) : 0)
+    tokens.reasoning * reasoningPrice
   );
+}
+
+// Default web-search overhead before any learning: ~14K tokens of results plus one search fee.
+export function webOverheadUsd(model: ModelRecord, inputPrice = model.pricing.inputPerTok): number {
+  return WEB_CONTEXT_TOKENS * inputPrice + (model.pricing.webSearchPerCall ?? 0.02);
 }
 
 // Prompt processing speed for very long inputs (provisional: ~10K tokens/s across current providers).
@@ -307,7 +331,7 @@ export function estimateLatencySeconds(
   model: ModelRecord,
   tokens: { input: number; output: number; reasoning: number },
   effort: Effort,
-  opts: { useWeb: boolean; cachedTokens?: number } = { useWeb: false },
+  opts: { useWeb: boolean; cachedTokens?: number; calibrated?: boolean } = { useWeb: false },
 ): number {
   const m = metricsFor(model, effort);
   // Cached prompt tokens are not re-processed, so a warm cache also starts answering sooner.
@@ -316,5 +340,6 @@ export function estimateLatencySeconds(
     Math.max(0, tokens.input - (opts.cachedTokens ?? 0)) / PREFILL_TOKENS_PER_S +
     (opts.useWeb ? WEB_SEARCH_S : 0) +
     (tokens.output + tokens.reasoning) / Math.max(m.tps, 1);
-  return base * (1 + 2 * (1 - reliability(model)));
+  const learned = opts.calibrated === false ? 1 : (model.calibration?.latency ?? 1);
+  return base * (1 + 2 * (1 - reliability(model))) * learned;
 }

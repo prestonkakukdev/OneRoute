@@ -61,6 +61,17 @@ export interface ModelRecord {
   // Live production speed and reliability across providers (OpenRouter).
   providerStats?: { tps: number; latencyS: number; uptime: number; providers: number; requests: number; measuredAt: string };
   profile?: string;
+  // Learned from real answers: actual / estimated for answer length, thinking tokens (per effort, '*' = any)
+  // and time. Applied on top of the benchmark-based estimates.
+  calibration?: {
+    output?: number; // any answer length
+    outputByLength?: Partial<Record<string, number>>; // per expected answer-length level ('0'-'3')
+    input?: number; // prompt tokens as billed vs the router's count (tokenizer differences)
+    latency?: number;
+    web?: number;
+    reasoning: Partial<Record<Effort | '*', number>>;
+    samples: number;
+  };
   notes?: string;
   updatedAt: string;
 }
@@ -82,6 +93,8 @@ export interface TaskProfile {
   latencySensitive: number;
   highStakes: number;
   underspecified?: number; // probability the request cannot be acted on without clarification
+  previousRejected?: number; // probability the user says the previous answer was wrong or unhelpful
+  previousConfirmed?: number; // probability the user confirms the previous answer worked
   source: 'jev' | 'heuristic';
   latencyMs: number;
   error?: string;
@@ -159,6 +172,8 @@ export interface RouteDecision {
   needs?: Partial<Record<Capability, number>>; // requirement weights for the most likely task type
   webReason?: string; // why web search was switched on or off
   recentWeb?: boolean; // an earlier turn of this conversation used web search
+  // Feedback inferred from this message about the conversation's previous answer.
+  implicitFeedback?: { requestId: string; modelId: string; success: boolean };
   rejected?: Record<string, string>; // model -> reason it failed a hard requirement
   routeMs: number;
 }
