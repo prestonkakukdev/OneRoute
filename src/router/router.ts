@@ -5,7 +5,7 @@ import { buildJevState, extractFacts, latestUserText } from '../classifier/state
 import { config } from '../config.js';
 import type { Store } from '../db/store.js';
 import { chatCompletion } from '../providers/openrouter.js';
-import type { Effort, TaskType } from '../taxonomy.js';
+import { EFFORTS, type Effort, type TaskType } from '../taxonomy.js';
 import type { Candidate, ChatRequest, Escalation, Preferences, RequestFacts, RouteDecision, RoutePrefs, TaskProfile } from '../types.js';
 import { conservativePick, escalateWithLlm, escalationReasons } from './escalate.js';
 import { requirementWeights } from './estimate.js';
@@ -30,12 +30,14 @@ function asClarification(task: TaskProfile): TaskProfile {
   return { ...task, difficulty: level(5, 1), reasoningDepth: level(4, 0), outputLength: level(4, 0) };
 }
 
-// Best effort level per model, in rank order.
-function shortlist(ranked: Candidate[]): Candidate[] {
+// Best effort level per model, in rank order. On a retry, the answer the user just rejected (same model at the
+// same or a lower effort) is left out, so the escalation model cannot pick it again.
+function shortlist(ranked: Candidate[], retry?: { modelId: string; effort: Effort }): Candidate[] {
   const seen = new Set<string>();
   const out: Candidate[] = [];
   for (const c of ranked) {
     if (seen.has(c.modelId)) continue;
+    if (retry && c.modelId === retry.modelId && EFFORTS.indexOf(c.effort as never) <= EFFORTS.indexOf(retry.effort as never)) continue;
     seen.add(c.modelId);
     out.push(c);
     if (out.length === SHORTLIST_SIZE) break;
@@ -173,7 +175,7 @@ export class Router {
     let escalation: Escalation | null = null;
     const reasons = prefs.escalation === 'off' ? [] : escalationReasons(task, ranked, successValue(task, facts, prefs));
     if (reasons.length) {
-      const list = shortlist(ranked);
+      const list = shortlist(ranked, retry);
       const t0 = performance.now();
       try {
         const pick = await escalateWithLlm(text, task, list, new Map(models.map((m) => [m.id, m])), reasons, this.deps.llm);

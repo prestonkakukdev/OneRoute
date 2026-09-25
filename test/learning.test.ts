@@ -1,3 +1,6 @@
+import { mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { Store } from '../src/db/store.js';
 import { observeAnswer } from '../src/learning/calibration.js';
@@ -92,6 +95,27 @@ describe('feedback inferred from the next message', () => {
     store.recordOutcome({ requestId: 'r1', modelId: MODEL, effort: 'low', status: 'ok' });
     store.recordFeedback('r1', true);
     expect(store.recordImplicitFeedback('r1', false, 'x')).toBe(false);
+  });
+
+  it('treats ratings recorded before feedback sources existed as the user\'s own', () => {
+    const path = join(mkdtempSync(join(tmpdir(), 'mrouter-')), 'db.sqlite');
+    const before = new Store(path);
+    before.recordOutcome({ requestId: 'r1', modelId: MODEL, effort: 'low', status: 'ok' });
+    before.recordFeedback('r1', true);
+    before.db.exec('UPDATE outcomes SET feedback_source = NULL'); // as written by the previous version
+    before.close();
+    const after = new Store(path);
+    expect(after.recordImplicitFeedback('r1', false, 'x')).toBe(false);
+    after.close();
+  });
+
+  it('reports user ratings and inferred feedback separately in stats', () => {
+    const store = new Store(':memory:');
+    store.recordOutcome({ requestId: 'r1', modelId: MODEL, effort: 'low', status: 'ok' });
+    store.recordOutcome({ requestId: 'r2', modelId: MODEL, effort: 'low', status: 'ok' });
+    store.recordFeedback('r1', true);
+    store.recordImplicitFeedback('r2', false, 'x');
+    expect(store.summary()[0]).toMatchObject({ good: 1, bad: 0, inferred_good: 0, inferred_bad: 1 });
   });
 
   it('counts implicit feedback at half weight when learning', () => {

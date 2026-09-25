@@ -457,16 +457,25 @@ program
     const store = new Store(config.dbPath);
     const { answers, models } = rebuildCalibration(store);
     console.log(`learned from ${answers} answers across ${models} models`);
+    const LENGTHS = ['sentences', 'paragraphs', 'document', 'very long'];
     const byModel = new Map<string, string[]>();
     for (const r of store.calibrationRows()) {
       const factor = Math.exp(r.sum_log / (r.n + CALIBRATION_PRIOR));
-      const label =
-        r.metric === 'reasoning' ? `thinking@${r.effort}` : r.metric === 'output' ? 'answer length' : r.metric === 'web' ? 'web overhead' : r.metric === 'input' ? 'prompt size' : 'time';
-      if ((r.metric === 'reasoning' || r.metric === 'output') && r.effort !== '*' && r.metric !== 'reasoning') continue;
+      // Per-effort thinking and per-length answer factors are shown individually; the thinking '*' row is
+      // only a fallback for efforts without their own data.
       if (r.metric === 'reasoning' && r.effort === '*') continue;
+      const label =
+        r.metric === 'reasoning' ? `thinking@${r.effort}`
+        : r.metric === 'output' ? (r.effort === '*' ? 'answer length' : `answer length (${LENGTHS[Number(r.effort)] ?? r.effort})`)
+        : r.metric === 'web' ? 'web overhead'
+        : r.metric === 'input' ? 'prompt size'
+        : 'time';
       byModel.set(r.model_id, [...(byModel.get(r.model_id) ?? []), `${label} x${factor.toFixed(2)} (n=${r.n})`]);
     }
+    const all = byModel.get('*');
+    byModel.delete('*');
     for (const [m, parts] of byModel) console.log(`  ${m.padEnd(34)} ${parts.join(' · ')}`);
+    if (all) console.log(`  ${'(all models, fallback)'.padEnd(34)} ${all.join(' · ')}`);
     store.close();
   });
 

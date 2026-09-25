@@ -59,7 +59,7 @@ export function observeAnswer(
     // What web search actually added in dollars (injected results and/or per-search fees): the bill minus
     // what the conversation itself and the answer cost, relative to the default assumption.
     const p = model.pricing;
-    const base = (facts.inputTokens + ROUTER_OVERHEAD_TOKENS) * p.inputPerTok + actual.completionTokens * p.outputPerTok;
+    const base = (facts.inputTokens + ROUTER_OVERHEAD_TOKENS) * p.inputPerTok + visible * p.outputPerTok + thinking * p.reasoningPerTok;
     const expected = webOverheadUsd(model);
     const r = clamp((Math.max(0, actual.costUsd - base) + expected * 0.05) / (expected * 1.05));
     store.addCalibration(model.id, 'web', '*', r);

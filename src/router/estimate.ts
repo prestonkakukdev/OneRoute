@@ -258,7 +258,8 @@ export function estimateTokens(
   const reasonFactor = c?.reasoning[effort] ?? c?.reasoning['*'] ?? 1;
   const calibratedOutput = facts.requestedMaxTokens ? Math.min(output * outFactor, facts.requestedMaxTokens) : output * outFactor;
   return {
-    input: Math.round(facts.inputTokens * (c?.input ?? 1)),
+    // The learned factor covers the whole prompt (router overhead included); estimateCost adds the overhead back.
+    input: c?.input ? Math.max(0, Math.round((facts.inputTokens + ROUTER_OVERHEAD_TOKENS) * c.input) - ROUTER_OVERHEAD_TOKENS) : facts.inputTokens,
     output: Math.round(calibratedOutput),
     reasoning: Math.round(reasoning * reasonFactor),
   };

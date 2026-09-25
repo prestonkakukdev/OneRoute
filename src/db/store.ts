@@ -186,6 +186,8 @@ export class Store {
     for (const [col, type] of [['cached_tokens', 'INTEGER'], ['cache_write_tokens', 'INTEGER'], ['provider', 'TEXT'], ['feedback_source', 'TEXT']] as const) {
       if (!cols.includes(col)) this.db.exec(`ALTER TABLE outcomes ADD COLUMN ${col} ${type}`);
     }
+    // Ratings recorded before feedback_source existed were all given by the user (implicit feedback always sets it).
+    this.db.exec(`UPDATE outcomes SET feedback_source = 'user' WHERE feedback_source IS NULL AND feedback_at IS NOT NULL`);
     const decisionCols = (this.db.prepare('PRAGMA table_info(decisions)').all() as Row[]).map((c) => c.name);
     if (!decisionCols.includes('use_web')) this.db.exec('ALTER TABLE decisions ADD COLUMN use_web INTEGER');
     const sessionCols = (this.db.prepare('PRAGMA table_info(sessions)').all() as Row[]).map((c) => c.name);
@@ -619,8 +621,10 @@ export class Store {
                 ROUND(SUM(COALESCE(o.cost_usd, 0)), 4) AS cost_usd,
                 ROUND(AVG(o.latency_ms)) AS avg_latency_ms,
                 SUM(CASE WHEN o.status = 'error' THEN 1 ELSE 0 END) AS errors,
-                SUM(CASE WHEN o.success = 1 THEN 1 ELSE 0 END) AS good,
-                SUM(CASE WHEN o.success = 0 THEN 1 ELSE 0 END) AS bad
+                SUM(CASE WHEN o.success = 1 AND o.feedback_source = 'user' THEN 1 ELSE 0 END) AS good,
+                SUM(CASE WHEN o.success = 0 AND o.feedback_source = 'user' THEN 1 ELSE 0 END) AS bad,
+                SUM(CASE WHEN o.success = 1 AND o.feedback_source = 'implicit' THEN 1 ELSE 0 END) AS inferred_good,
+                SUM(CASE WHEN o.success = 0 AND o.feedback_source = 'implicit' THEN 1 ELSE 0 END) AS inferred_bad
          FROM outcomes o GROUP BY o.model_id ORDER BY requests DESC`,
       )
       .all() as Row[];
