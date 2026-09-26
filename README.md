@@ -34,8 +34,8 @@ You need **Node.js 22.13 or newer**, an **[OpenRouter](https://openrouter.ai/key
 the models) and a **Jev / [TypeSafe](https://typesafe.ai) API key** (it reads the requests).
 
 ```bash
-git clone https://github.com/prestonkakukdev/model-router.git
-cd model-router
+git clone https://github.com/prestonkakukdev/System1-Route.git
+cd System1-Route
 npm install
 npm run setup      # asks for your two keys, builds everything and checks the keys work
 npm start          # then open http://localhost:8787

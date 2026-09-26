@@ -5,8 +5,8 @@ Thanks for helping improve Model Router. Issues and pull requests are welcome.
 ## Getting set up
 
 ```bash
-git clone https://github.com/prestonkakukdev/model-router.git
-cd model-router
+git clone https://github.com/prestonkakukdev/System1-Route.git
+cd System1-Route
 npm install
 npm run setup        # keys are only needed to run the router, not for tests
 ```

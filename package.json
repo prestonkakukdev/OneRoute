@@ -10,13 +10,13 @@
     "openai-compatible",
     "ai"
   ],
-  "homepage": "https://github.com/prestonkakukdev/model-router#readme",
+  "homepage": "https://github.com/prestonkakukdev/System1-Route#readme",
   "bugs": {
-    "url": "https://github.com/prestonkakukdev/model-router/issues"
+    "url": "https://github.com/prestonkakukdev/System1-Route/issues"
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/prestonkakukdev/model-router.git"
+    "url": "git+https://github.com/prestonkakukdev/System1-Route.git"
   },
   "license": "Apache-2.0",
   "type": "module",
