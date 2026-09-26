@@ -434,7 +434,7 @@ export default function App() {
                   initial={{ opacity: 0, y: 10, filter: 'blur(6px)' }}
                   animate={{ opacity: 1, y: 0, filter: 'blur(0px)' }}
                   transition={{ duration: 0.6, delay: 0.15, ease: [0.2, 0, 0, 1] }}
-                  className="m-auto flex max-w-140 flex-col items-center pt-[28vh] text-center max-lg:pt-[16vh]"
+                  className="m-auto flex max-w-140 flex-col items-center pt-[32vh] text-center max-lg:pt-[18vh]"
                 >
                   <h2 className="font-display text-[34px] leading-[1.12] font-medium tracking-[-0.02em] text-balance max-sm:text-[27px]">
                     The routing architecture defined by speed and efficiency.
