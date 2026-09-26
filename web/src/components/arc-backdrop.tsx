@@ -2,8 +2,7 @@ import { motion, useReducedMotion } from 'framer-motion';
 import { cn } from '@/lib/utils';
 
 // A large glowing blue arc (a planet's horizon seen from space), drawn in SVG so it stays sharp at any
-// size: a wide soft halo, a saturated blue band, and a bright lavender rim, each blurred, over a dark
-// interior that fades into the page.
+// size: blurred rings for the lavender band, its blue inner edge and the glows on either side.
 export function ArcBackdrop({ className }: { className?: string }) {
   const reduceMotion = useReducedMotion();
   return (
@@ -19,40 +18,36 @@ export function ArcBackdrop({ className }: { className?: string }) {
         viewBox="0 0 1600 1000"
         preserveAspectRatio="xMidYMin slice"
         className="absolute inset-x-0 top-0 h-full w-full"
-        animate={reduceMotion ? undefined : { opacity: [0.88, 1, 0.88] }}
+        animate={reduceMotion ? undefined : { opacity: [0.9, 1, 0.9] }}
         transition={{ duration: 7, ease: 'easeInOut', repeat: Infinity }}
       >
         <defs>
-          <filter id="arc-halo" x="-50%" y="-50%" width="200%" height="200%">
-            <feGaussianBlur stdDeviation="55" />
+          <filter id="arc-soft" x="-50%" y="-50%" width="200%" height="200%">
+            <feGaussianBlur stdDeviation="12" />
           </filter>
-          <filter id="arc-band" x="-50%" y="-50%" width="200%" height="200%">
-            <feGaussianBlur stdDeviation="18" />
+          <filter id="arc-edge" x="-50%" y="-50%" width="200%" height="200%">
+            <feGaussianBlur stdDeviation="10" />
           </filter>
-          <filter id="arc-rim" x="-50%" y="-50%" width="200%" height="200%">
-            <feGaussianBlur stdDeviation="6" />
+          <filter id="arc-glow" x="-50%" y="-50%" width="200%" height="200%">
+            <feGaussianBlur stdDeviation="40" />
           </filter>
-          {/* The planet's dark side: fades from the page colour at the rim to deeper black inside */}
-          <radialGradient id="arc-core" cx="800" cy="1150" r="900" gradientUnits="userSpaceOnUse">
-            <stop offset="0.72" stopColor="#030309" />
-            <stop offset="0.96" stopColor="#0a0a1c" />
-            <stop offset="1" stopColor="#0a0a0a" stopOpacity="0" />
-          </radialGradient>
           {/* Fade the arc's lower ends into the page so it sits behind the chat, not across it */}
           <linearGradient id="arc-fade" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0.45" stopColor="white" />
-            <stop offset="0.95" stopColor="white" stopOpacity="0" />
+            <stop offset="0.5" stopColor="white" />
+            <stop offset="1" stopColor="white" stopOpacity="0" />
           </linearGradient>
           <mask id="arc-mask">
             <rect width="1600" height="1000" fill="url(#arc-fade)" />
           </mask>
         </defs>
+        {/* Outside to inside: faint violet haze, the wide lavender band (with a lighter outer rim), a
+            saturated blue inner edge, and a blue glow falling off into the dark side. */}
         <g mask="url(#arc-mask)">
-          <circle cx="800" cy="1150" r="900" fill="none" stroke="#3b2cff" strokeOpacity="0.55" strokeWidth="190" filter="url(#arc-halo)" />
-          <circle cx="800" cy="1150" r="880" fill="none" stroke="#5647ff" strokeOpacity="0.85" strokeWidth="70" filter="url(#arc-band)" />
-          <circle cx="800" cy="1150" r="900" fill="none" stroke="#a9a2ff" strokeOpacity="0.9" strokeWidth="26" filter="url(#arc-rim)" />
-          <circle cx="800" cy="1150" r="888" fill="url(#arc-core)" />
-          <circle cx="800" cy="1150" r="866" fill="none" stroke="#6b5cff" strokeOpacity="0.35" strokeWidth="60" filter="url(#arc-band)" />
+          <circle cx="800" cy="1130" r="935" fill="none" stroke="#2e2596" strokeOpacity="0.35" strokeWidth="70" filter="url(#arc-glow)" />
+          <circle cx="800" cy="1130" r="805" fill="none" stroke="#3322d6" strokeOpacity="0.5" strokeWidth="80" filter="url(#arc-glow)" />
+          <circle cx="800" cy="1130" r="876" fill="none" stroke="#a39ef4" strokeOpacity="0.97" strokeWidth="90" filter="url(#arc-soft)" />
+          <circle cx="800" cy="1130" r="898" fill="none" stroke="#bcb8ff" strokeOpacity="0.4" strokeWidth="30" filter="url(#arc-soft)" />
+          <circle cx="800" cy="1130" r="830" fill="none" stroke="#5a44ff" strokeOpacity="0.95" strokeWidth="30" filter="url(#arc-edge)" />
         </g>
       </motion.svg>
     </motion.div>

@@ -434,12 +434,8 @@ export default function App() {
                   initial={{ opacity: 0, y: 10, filter: 'blur(6px)' }}
                   animate={{ opacity: 1, y: 0, filter: 'blur(0px)' }}
                   transition={{ duration: 0.6, delay: 0.15, ease: [0.2, 0, 0, 1] }}
-                  className="m-auto flex max-w-140 flex-col items-center pt-[22vh] text-center max-lg:pt-[12vh]"
+                  className="m-auto flex max-w-140 flex-col items-center pt-[28vh] text-center max-lg:pt-[16vh]"
                 >
-                  <div className="text-muted-foreground mb-4 flex items-center gap-2 font-mono text-[11px] tracking-[0.18em] uppercase">
-                    <span className="size-1.5 rounded-full bg-[#7b6cff] shadow-[0_0_10px_2px_rgba(123,108,255,0.7)]" />
-                    Powered by Jev
-                  </div>
                   <h2 className="font-display text-[34px] leading-[1.12] font-medium tracking-[-0.02em] text-balance max-sm:text-[27px]">
                     The routing architecture defined by speed and efficiency.
                   </h2>
