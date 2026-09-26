@@ -108,7 +108,7 @@ The interface is React + TypeScript + Tailwind v4 in `web/`, laid out the shadcn
 files on every request, so after `npm run web:build` a refresh shows the change without restarting. For live reload
 while editing the interface, run `npm run web:dev` next to a running router and open http://localhost:5173.
 
-Chat on the left. Click any answer to inspect it on the right: Jev's reading (task type, difficulty,
+Chat in the middle. **Inspect** (the magnifier under an answer, or the one top right) opens the inspector: Jev's reading (task type, difficulty,
 reasoning depth, answer length, signals, capability importance), the capability weights the router looked for,
 a plain-English "why this model", the top candidates with a score breakdown (value and quality vs cost, time and
 preference penalties), models ruled out, and the actual cost and time once the answer finishes. Rate answers with 👍/👎

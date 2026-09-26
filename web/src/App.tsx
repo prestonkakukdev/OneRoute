@@ -4,9 +4,8 @@ import {
   PaperclipIcon,
   PanelLeftCloseIcon,
   PanelLeftOpenIcon,
-  PanelRightCloseIcon,
-  PanelRightOpenIcon,
   RouteIcon,
+  ScanSearchIcon,
   SlidersHorizontalIcon,
   SquarePenIcon,
   TelescopeIcon,
@@ -87,8 +86,8 @@ function useInspectorWidth() {
 }
 
 function PanelToggle({ open, side, onClick }: { open: boolean; side: 'left' | 'right'; onClick: () => void }) {
-  const Icon = side === 'left' ? (open ? PanelLeftCloseIcon : PanelLeftOpenIcon) : open ? PanelRightCloseIcon : PanelRightOpenIcon;
-  const what = side === 'left' ? 'chats' : 'routing details';
+  const Icon = side === 'left' ? (open ? PanelLeftCloseIcon : PanelLeftOpenIcon) : ScanSearchIcon;
+  const what = side === 'left' ? 'chats' : 'inspector';
   return (
     <button
       type="button"
@@ -96,7 +95,10 @@ function PanelToggle({ open, side, onClick }: { open: boolean; side: 'left' | 'r
       aria-label={`${open ? 'Hide' : 'Show'} ${what}`}
       aria-expanded={open}
       title={`${open ? 'Hide' : 'Show'} ${what}`}
-      className="text-muted-foreground hover:bg-muted hover:text-foreground flex size-9 cursor-pointer items-center justify-center rounded-xl transition-colors active:scale-[0.96]"
+      className={cn(
+        'text-muted-foreground hover:bg-muted hover:text-foreground flex size-9 cursor-pointer items-center justify-center rounded-xl transition-colors active:scale-[0.96]',
+        side === 'right' && open && 'bg-muted text-foreground',
+      )}
     >
       <Icon className="size-4" aria-hidden />
     </button>
@@ -391,9 +393,6 @@ export default function App() {
     <div className="grid h-full grid-rows-[auto_1fr]">
       <header className="app-header flex items-center gap-2.5 border-b py-2 pr-3 pl-2.5">
         <PanelToggle side="left" open={sidebarOpen} onClick={() => setSidebarOpen((v) => !v)} />
-        <div className="flex size-5.5 items-center justify-center rounded-[7px] bg-linear-to-b from-[#f7f7f7] to-white text-black">
-          <RouteIcon className="size-3.5" aria-hidden />
-        </div>
         <h1 className="text-sm font-semibold tracking-tight">System1 Route</h1>
         <Chip tone="soft">{userTurns ? `${userTurns} turn${userTurns > 1 ? 's' : ''}` : 'new session'}</Chip>
         <div className="flex-1" />
@@ -445,7 +444,7 @@ export default function App() {
                 >
                   <h2 className="mb-2 text-[22px] font-semibold tracking-tight">What should the router handle?</h2>
                   <p className="text-muted-foreground">
-                    Every answer shows the model and effort that were picked. Click an answer to see Jev's reading of the request and why that model won.
+                    Each request goes to the model and effort that fit it best. Use Inspect under an answer to see Jev's reading of the request and why that model won.
                   </p>
                   <div className="mt-5.5 flex flex-wrap justify-center gap-2">
                     {SUGGESTIONS.map((s) => (
@@ -464,7 +463,14 @@ export default function App() {
                 turns.map((t) => (
                   <React.Fragment key={t.id}>
                     <UserMessage turn={t} />
-                    <AssistantMessage turn={t} selected={t.id === selectedId} onSelect={() => setSelectedId(t.id)} />
+                    <AssistantMessage
+                      turn={t}
+                      inspecting={inspectorOpen && t.id === selectedId}
+                      onInspect={() => {
+                        setSelectedId(t.id);
+                        setInspectorOpen(true);
+                      }}
+                    />
                   </React.Fragment>
                 ))
               )}
@@ -578,7 +584,7 @@ export default function App() {
           {inspectorOpen ? (
             <motion.aside
               key="inspector"
-              aria-label="Routing details"
+              aria-label="Inspector"
               initial={{ width: 0, opacity: 0 }}
               animate={{ width: inspectorWidth, opacity: 1 }}
               exit={{ width: 0, opacity: 0 }}

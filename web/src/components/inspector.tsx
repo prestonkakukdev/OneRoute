@@ -94,9 +94,9 @@ export function Inspector({ turn, onFeedback }: { turn?: Turn; onFeedback: (turn
 
   if (!turn) {
     return (
-      <Panel title="Routing inspector">
+      <Panel title="Inspector">
         <p className="text-muted-foreground text-[13px]">
-          Send a message, then click an answer to see Jev's reading, the capabilities the router looked for, and why the chosen model won.
+          Send a message, then use Inspect under an answer to see Jev's reading, the capabilities the router looked for, and why the chosen model won.
         </p>
       </Panel>
     );
@@ -226,7 +226,7 @@ export function Inspector({ turn, onFeedback }: { turn?: Turn; onFeedback: (turn
                 return (
                   <tr
                     key={`${c.modelId}-${c.effort}`}
-                    className={cn('text-muted-foreground border-b border-white/5 whitespace-nowrap', i === 0 && 'text-foreground [&>td]:bg-muted first:[&>td]:rounded-l-[10px] last:[&>td]:rounded-r-[10px]')}
+                    className={cn('text-muted-foreground border-b border-white/5 whitespace-nowrap', i === 0 && 'text-foreground [&>td]:bg-muted [&>td:first-child]:rounded-l-[10px] [&>td:last-child]:rounded-r-[10px]')}
                     title={`value ${usd(b.value)} · quality ${usd(b.quality)} · cost −${usd(b.cost)} · time −${usd(b.latency)} · preference −${usd(b.preference)}`}
                   >
                     <td className="p-1.5">{shortModel(c.modelId)}</td>

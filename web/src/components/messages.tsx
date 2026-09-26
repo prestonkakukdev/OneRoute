@@ -1,9 +1,9 @@
 import { AnimatePresence, motion } from 'framer-motion';
-import { CheckIcon, CopyIcon, GlobeIcon, SparklesIcon } from 'lucide-react';
+import { CheckIcon, CopyIcon, GlobeIcon, ScanSearchIcon } from 'lucide-react';
 import * as React from 'react';
 import type { Decision, Done } from '@/lib/api';
 import type { Attachment } from '@/lib/attachments';
-import { label, secs, shortModel, usd } from '@/lib/format';
+import { shortModel } from '@/lib/format';
 import { renderMarkdown } from '@/lib/markdown';
 import { cn } from '@/lib/utils';
 import { AttachmentTile } from './attachment-tile';
@@ -87,6 +87,10 @@ const Answer = React.memo(function Answer({ text }: { text: string }) {
   return <div className="prose-answer" onClick={onClick} dangerouslySetInnerHTML={{ __html: html }} />;
 });
 
+// Quiet icon buttons under each answer (Copy, Inspect).
+const ACTION_BTN =
+  'text-muted-foreground hover:bg-muted hover:text-foreground flex size-8 cursor-pointer items-center justify-center rounded-lg transition-colors duration-150 [&_svg]:size-4';
+
 function CopyButton({ text }: { text: string }) {
   const [state, setState] = React.useState<'idle' | 'copied' | 'failed'>('idle');
   React.useEffect(() => {
@@ -94,41 +98,37 @@ function CopyButton({ text }: { text: string }) {
     const id = window.setTimeout(() => setState('idle'), 1500);
     return () => window.clearTimeout(id);
   }, [state]);
+  const label = state === 'copied' ? 'Copied' : state === 'failed' ? 'Copy failed' : 'Copy response';
   return (
     <motion.button
       type="button"
-      aria-label={state === 'copied' ? 'Copied' : 'Copy response'}
-      title="Copy response"
-      onClick={async (e) => {
-        e.stopPropagation();
-        setState((await copyText(text)) ? 'copied' : 'failed');
-      }}
-      whileTap={{ scale: 0.94 }}
-      className="text-muted-foreground hover:bg-muted hover:text-foreground flex h-7 cursor-pointer items-center gap-1.5 rounded-lg px-2 text-xs font-medium transition-colors duration-150"
+      aria-label={label}
+      title={label}
+      onClick={async () => setState((await copyText(text)) ? 'copied' : 'failed')}
+      whileTap={{ scale: 0.92 }}
+      className={cn(ACTION_BTN, state === 'failed' && 'text-bad')}
     >
       <AnimatePresence mode="wait" initial={false}>
         <motion.span
-          key={state}
+          key={state === 'copied' ? 'check' : 'copy'}
           initial={{ opacity: 0, scale: 0.25, filter: 'blur(4px)' }}
           animate={{ opacity: 1, scale: 1, filter: 'blur(0px)' }}
           exit={{ opacity: 0, scale: 0.25, filter: 'blur(4px)' }}
           transition={{ type: 'spring', duration: 0.3, bounce: 0 }}
           className="flex"
         >
-          {state === 'copied' ? <CheckIcon className="size-3.5" aria-hidden /> : <CopyIcon className="size-3.5" aria-hidden />}
+          {state === 'copied' ? <CheckIcon aria-hidden /> : <CopyIcon aria-hidden />}
         </motion.span>
       </AnimatePresence>
-      {state === 'copied' ? 'Copied' : state === 'failed' ? 'Copy failed' : 'Copy'}
     </motion.button>
   );
 }
 
-export function AssistantMessage({ turn, selected, onSelect }: { turn: Turn; selected: boolean; onSelect: () => void }) {
+export function AssistantMessage({ turn, inspecting, onInspect }: { turn: Turn; inspecting: boolean; onInspect: () => void }) {
   const d = turn.decision;
-  const c = d?.candidates?.[0];
   let body: React.ReactNode;
   if (turn.error) body = <ErrorBox>{turn.error}</ErrorBox>;
-  else if (turn.dryRun && d) body = <span className="text-muted-foreground">Route only: no model was called.</span>;
+  else if (turn.dryRun && d) body = <span className="text-muted-foreground">Route only: no model was called. Inspect it to see the decision.</span>;
   else if (turn.answer) {
     const sources = turn.done?.sources ?? [];
     body = (
@@ -137,7 +137,7 @@ export function AssistantMessage({ turn, selected, onSelect }: { turn: Turn; sel
         {sources.length ? (
           <div className="mt-3 flex flex-wrap gap-1.5">
             {sources.map((s, i) => (
-              <a key={s.url} href={s.url} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()} className="hover:[&>span]:text-foreground">
+              <a key={s.url} href={s.url} target="_blank" rel="noopener noreferrer" className="hover:[&>span]:text-foreground">
                 <Chip tone="soft">
                   <GlobeIcon aria-hidden />
                   {i + 1}. {s.title}
@@ -149,49 +149,29 @@ export function AssistantMessage({ turn, selected, onSelect }: { turn: Turn; sel
       </>
     );
   } else if (d) body = <span className="shimmer-text">{turn.thinking ? 'Thinking…' : `Waiting for ${shortModel(d.modelId)}…`}</span>;
-  else body = <span className="shimmer-text">Asking Jev…</span>;
+  else body = <span className="shimmer-text">{turn.dryRun ? 'Routing…' : 'Asking Jev…'}</span>;
 
+  // Actions appear once the turn has settled (answered, failed, or routed only).
+  const settled = Boolean(turn.done || turn.error || (turn.dryRun && d));
   return (
-    <motion.div
-      {...enter}
-      onClick={onSelect}
-      className={cn(
-        '-mx-1.5 cursor-pointer rounded-2xl px-1.5 pt-1 pb-1.5 transition-colors duration-200 ease-[cubic-bezier(0.2,0,0,1)]',
-        'hover:bg-muted/55',
-        selected && 'bg-muted/55 shadow-[inset_0_0_0_1px_var(--border)]',
-      )}
-    >
-      <div className="text-muted-foreground mt-1 mb-2 flex flex-wrap items-center gap-1.5 text-xs">
-        {d ? (
-          <>
-            <Chip>
-              <SparklesIcon aria-hidden />
-              {shortModel(d.modelId)}
-            </Chip>
-            <Chip tone="soft">{d.effort}</Chip>
-            <span>
-              {label(d.task.taskType.value)} · d{d.task.difficulty.value}
-            </span>
-            {d.useWeb ? (
-              <Chip tone="soft">
-                <GlobeIcon aria-hidden />
-                web
-              </Chip>
-            ) : null}
-            {d.escalation ? <Chip tone="warn">escalated</Chip> : null}
-            {d.task.source !== 'jev' ? <Chip tone="bad">keyword fallback</Chip> : null}
-            <span className="ml-auto tabular-nums">
-              {turn.done ? `${usd(turn.done.usage?.cost)} · ${secs(turn.done.latencyMs / 1000)}` : c ? `est ${usd(c.estCostUsd)} · ${secs(c.estLatencyS)}` : ''}
-            </span>
-          </>
-        ) : (
-          <span className="shimmer-text">Routing…</span>
-        )}
-      </div>
-      <div className="px-0.5">{body}</div>
-      {turn.answer && (turn.done || turn.error) ? (
-        <div className="mt-2 -ml-1 flex items-center gap-1">
-          <CopyButton text={turn.answer} />
+    <motion.div {...enter} className="px-0.5">
+      {body}
+      {settled ? (
+        <div className="mt-2.5 flex items-center gap-0.5">
+          {turn.answer ? <CopyButton text={turn.answer} /> : null}
+          {d ? (
+            <motion.button
+              type="button"
+              aria-label="Inspect this answer"
+              aria-pressed={inspecting}
+              title="Inspect: model, cost and why it was chosen"
+              onClick={onInspect}
+              whileTap={{ scale: 0.92 }}
+              className={cn(ACTION_BTN, inspecting && 'bg-muted text-foreground')}
+            >
+              <ScanSearchIcon aria-hidden />
+            </motion.button>
+          ) : null}
         </div>
       ) : null}
     </motion.div>
