@@ -101,7 +101,7 @@ function headers(): Record<string, string> {
   const h: Record<string, string> = {
     'Content-Type': 'application/json',
     'HTTP-Referer': 'https://github.com/prestonkakukdev/System1-Route',
-    'X-Title': 'Model Router',
+    'X-Title': 'System1 Route',
   };
   if (config.openRouterKey) h.Authorization = `Bearer ${config.openRouterKey}`;
   return h;

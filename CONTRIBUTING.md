@@ -1,6 +1,6 @@
 # Contributing
 
-Thanks for helping improve Model Router. Issues and pull requests are welcome.
+Thanks for helping improve System1 Route. Issues and pull requests are welcome.
 
 ## Getting set up
 
@@ -34,13 +34,13 @@ Useful commands:
   and after and describe the difference in the pull request.
 - New vendor benchmark numbers go in `data/vendor-benchmarks.json` (with the source URL); model name mappings in
   `data/model-map.json`.
-- To update the shipped model database, run `mrouter ingest` (needs a free Artificial Analysis key) and then
-  `mrouter catalog export`, and commit `data/catalog.json`.
+- To update the shipped model database, run `s1route ingest` (needs a free Artificial Analysis key) and then
+  `s1route catalog export`, and commit `data/catalog.json`.
 
 ## Reporting bugs
 
 Open an issue with what you did, what you expected and what happened. For routing surprises, the decision JSON (the
-app's inspector → "Raw decision JSON", or `mrouter route --json "..."`) is the most useful thing to include. Remove
+app's inspector → "Raw decision JSON", or `s1route route --json "..."`) is the most useful thing to include. Remove
 anything private from it first.
 
 By contributing you agree that your contributions are licensed under the Apache License 2.0.

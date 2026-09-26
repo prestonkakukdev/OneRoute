@@ -19,7 +19,7 @@ const step = (s) => console.log(`\n${bold(s)}`);
 
 const [major, minor] = process.versions.node.split('.').map(Number);
 if (major < 22 || (major === 22 && minor < 13)) {
-  console.error(red(`Node ${process.versions.node} is too old: Model Router needs Node 22.13 or newer (it uses the built-in SQLite).`));
+  console.error(red(`Node ${process.versions.node} is too old: System1 Route needs Node 22.13 or newer (it uses the built-in SQLite).`));
   process.exit(1);
 }
 

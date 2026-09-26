@@ -202,7 +202,7 @@ const SESSION_TTL_MS = (config.sessionCacheTtl === '1h' ? 55 : 5) * 60 * 1000;
 export class Store {
   readonly db: DatabaseSync;
   // Routing reads the whole catalog on every request; it is cached and dropped whenever this connection
-  // writes catalog data or another process (e.g. `mrouter ingest`) commits (PRAGMA data_version changes).
+  // writes catalog data or another process (e.g. `s1route ingest`) commits (PRAGMA data_version changes).
   private catalogCache: { version: number; all: ModelRecord[] } | undefined;
   private statsCache: { version: number; stats: Map<string, SuccessStat> } | undefined;
 

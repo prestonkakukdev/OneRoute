@@ -21,7 +21,7 @@ export function loadSnapshot(): OpenRouterModel[] {
 
 const CODING = new Set<Capability>(['code_generation', 'code_debugging', 'software_engineering']);
 
-// Bootstrap priors (used only before the first `mrouter ingest`): coding capabilities from the coding
+// Bootstrap priors (used only before the first `s1route ingest`): coding capabilities from the coding
 // index, everything else from the general index.
 export function priorSkills(intelligence: number, coding: number | null, source: string, trust: number, at: string) {
   const general = intelligence * INDEX_TO_SKILL;

@@ -1,5 +1,5 @@
 {
-  "name": "model-router",
+  "name": "system1-route",
   "version": "0.1.0",
   "description": "Routes every request to the best model and reasoning effort: Jev classifies the task, a deterministic optimizer picks from a capability database. OpenAI-compatible API, CLI and chat app.",
   "keywords": [
@@ -25,7 +25,7 @@
     "node": ">=22.13"
   },
   "bin": {
-    "mrouter": "dist/cli/index.js"
+    "s1route": "dist/cli/index.js"
   },
   "scripts": {
     "dev": "tsx src/cli/index.ts",

@@ -1,11 +1,11 @@
-// Keeps the router running for the background service (launchd runs this file; see `mrouter service`).
+// Keeps the router running for the background service (launchd runs this file; see `s1route service`).
 //
 //   - Starts the router and restarts it when it crashes (with backoff) or when its code or .env changes.
 //   - Rebuilds the app (web/dist) whenever the interface source changes; the router serves the new
 //     files on the next refresh.
 //   - Keeps the log file from growing without bound.
 //
-// Plain JavaScript so it runs without a build step. Stop it with `mrouter service stop` (launchd would
+// Plain JavaScript so it runs without a build step. Stop it with `s1route service stop` (launchd would
 // otherwise restart it).
 
 import { spawn } from 'node:child_process';

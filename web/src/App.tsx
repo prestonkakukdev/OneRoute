@@ -394,7 +394,7 @@ export default function App() {
         <div className="flex size-5.5 items-center justify-center rounded-[7px] bg-linear-to-b from-[#f7f7f7] to-white text-black">
           <RouteIcon className="size-3.5" aria-hidden />
         </div>
-        <h1 className="text-sm font-semibold tracking-tight">Model Router</h1>
+        <h1 className="text-sm font-semibold tracking-tight">System1 Route</h1>
         <Chip tone="soft">{userTurns ? `${userTurns} turn${userTurns > 1 ? 's' : ''}` : 'new session'}</Chip>
         <div className="flex-1" />
         <button

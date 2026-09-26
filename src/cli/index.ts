@@ -73,13 +73,13 @@ function warnAppNotBuilt(): void {
 }
 
 function warnMissingKeys(): void {
-  if (!existsSync(config.dbPath)) console.error(dim('No capability database yet: run `mrouter ingest` first (bootstrap priors are used until then).'));
+  if (!existsSync(config.dbPath)) console.error(dim('No capability database yet: run `s1route ingest` first (bootstrap priors are used until then).'));
   if (!config.typesafeKey) console.error(dim('TYPESAFE_API_KEY not set: using the keyword fallback classifier.'));
   if (!config.openRouterKey) console.error(dim('OPENROUTER_API_KEY not set: models cannot be called.'));
 }
 
 const program = new Command()
-  .name('mrouter')
+  .name('s1route')
   .description('Semantic LLM router: Jev reads the task, a deterministic optimizer picks the model and reasoning effort.');
 
 program
@@ -247,7 +247,7 @@ program
     const store = new Store(config.dbPath);
     const app = createApp(store, new Router(store));
     serve({ fetch: app.fetch, port: opts.port, hostname: opts.host }, (info) => {
-      console.log(`Model Router gateway on http://${opts.host}:${info.port}/v1  (POST /chat/completions, /route, /feedback; GET /models)`);
+      console.log(`System1 Route gateway on http://${opts.host}:${info.port}/v1  (POST /chat/completions, /route, /feedback; GET /models)`);
       console.log(`Testing interface on http://${opts.host === '0.0.0.0' ? '127.0.0.1' : opts.host}:${info.port}/`);
       if (!config.gatewayKey && opts.host !== '127.0.0.1' && opts.host !== 'localhost') {
         console.log(red('Warning: ROUTER_API_KEY is not set and the gateway is reachable from the network.'));
@@ -281,7 +281,7 @@ program
     console.log(`updated ${report.updated.length} models`);
     if (report.missing.length) console.log(red(`no longer on OpenRouter: ${report.missing.join(', ')}`));
     if (report.untracked.length) {
-      console.log('\nRecent models from tracked providers with no benchmark data yet (they join on the next `mrouter ingest` once benchmarked; unusual names go in data/model-map.json):');
+      console.log('\nRecent models from tracked providers with no benchmark data yet (they join on the next `s1route ingest` once benchmarked; unusual names go in data/model-map.json):');
       for (const m of report.untracked.slice(0, 25)) console.log(`  ${m.created}  ${m.id}`);
     }
     store.close();
@@ -530,7 +530,7 @@ program
 const catalogCmd = program.command('catalog').description('The shipped model catalog (data/catalog.json): capability scores, speed, pricing');
 catalogCmd
   .command('export')
-  .description('Write the local model database to data/catalog.json (after `mrouter ingest`, to share it)')
+  .description('Write the local model database to data/catalog.json (after `s1route ingest`, to share it)')
   .action(() => {
     const store = new Store(config.dbPath);
     const c = writeCatalog(store.db);

@@ -5,7 +5,7 @@
 Please **don't open a public issue** for security problems. Report them privately through GitHub:
 **Security → Report a vulnerability** on this repository. You'll get a reply within a few days.
 
-## How Model Router handles secrets and data
+## How System1 Route handles secrets and data
 
 - API keys live only in your local `.env` (git-ignored) and are sent only to the services they belong to
   (OpenRouter, TypeSafe/Jev, and optionally Artificial Analysis).

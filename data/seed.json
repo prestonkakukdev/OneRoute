@@ -4,7 +4,7 @@
     "url": "https://modelgrep.com/leaderboard",
     "fetchedAt": "2026-09-23",
     "trust": 0.5,
-    "note": "Third-party priors only. Pricing, context, modalities and effort levels come from OpenRouter via `mrouter sync`. Replace these priors with our own evals."
+    "note": "Third-party priors only. Pricing, context, modalities and effort levels come from OpenRouter via `s1route sync`. Replace these priors with our own evals."
   },
   "models": [
     { "id": "anthropic/claude-opus-5.5", "intelligence": 57.6, "coding": null, "tps": 144, "ttftMs": 1500 },
