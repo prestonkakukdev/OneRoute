@@ -115,6 +115,13 @@
   animation: var(--animate-shimmer);
 }
 
+/* highlight.js's theme paints its own background and padding on code blocks. It is unlayered CSS, which
+   beats anything inside @layer, so the override has to be unlayered too. */
+.prose-answer pre code.hljs {
+  background: transparent;
+  padding: 0;
+}
+
 /* Model answers rendered from Markdown */
 @layer components {
   .prose-answer { word-wrap: break-word; font-size: 15px; line-height: 1.7; }
@@ -149,7 +156,6 @@
   .prose-answer pre { background: var(--popover); border: 1px solid var(--border); padding: 12px 14px; border-radius: 12px; overflow-x: auto; white-space: pre; line-height: 1.55; margin: 12px 0; }
   .prose-answer code { font-family: var(--font-mono); font-size: 13px; }
   .prose-answer :not(pre) > code { background: var(--muted); padding: 1px 5px; border-radius: 6px; }
-  .prose-answer pre code.hljs { background: transparent; padding: 0; }
   .prose-answer .katex { font-size: 1.05em; }
   .prose-answer .katex-display { margin: 12px 0; overflow-x: auto; overflow-y: hidden; padding: 2px 0; }
   .prose-answer .plain { white-space: pre-wrap; }

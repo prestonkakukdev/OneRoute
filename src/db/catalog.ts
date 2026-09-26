@@ -1,6 +1,6 @@
 // The model catalog (models, per-effort capability scores, speed, live provider stats, profiles) as a
 // file that ships with the repo, so a fresh clone routes with the full database without running
-// `s1route ingest` (which needs an Artificial Analysis key). Usage data never goes in here: decisions,
+// `oneroute ingest` (which needs an Artificial Analysis key). Usage data never goes in here: decisions,
 // outcomes, feedback, learned calibration, sessions and saved chats stay in the local database.
 
 import type { DatabaseSync } from 'node:sqlite';

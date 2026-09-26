@@ -100,8 +100,8 @@ export function parseOpenRouterModel(raw: OpenRouterModel): ModelMetadata {
 function headers(): Record<string, string> {
   const h: Record<string, string> = {
     'Content-Type': 'application/json',
-    'HTTP-Referer': 'https://github.com/prestonkakukdev/System1-Route',
-    'X-Title': 'System1 Route',
+    'HTTP-Referer': 'https://github.com/prestonkakukdev/OneRoute',
+    'X-Title': 'OneRoute',
   };
   if (config.openRouterKey) h.Authorization = `Bearer ${config.openRouterKey}`;
   return h;

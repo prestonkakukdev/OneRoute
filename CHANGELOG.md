@@ -2,8 +2,8 @@
 
 ## Unreleased
 
-- Renamed the project from Model Router to System1 Route: the CLI is now `s1route`, the macOS service
-  `com.system1route.service` (installing replaces the old agent), logs in `~/Library/Logs/System1Route/`.
+- Renamed the project to OneRoute (earlier: Model Router, then System1 Route): the CLI is now `oneroute`,
+  the macOS service `com.oneroute.service` (installing replaces older agents), logs in `~/Library/Logs/OneRoute/`.
 
 ## 0.1.0 (2026-09-26)
 

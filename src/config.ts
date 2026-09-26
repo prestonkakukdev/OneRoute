@@ -15,14 +15,14 @@ function mode(raw: string | undefined): Mode {
   return MODES.includes(raw as Mode) ? (raw as Mode) : 'balanced';
 }
 
-// Optional user defaults (e.g. preferences) in ./s1route.config.json; request options override them.
+// Optional user defaults (e.g. preferences) in ./oneroute.config.json; request options override them.
 function loadUserConfig(): { mode?: string; preferences?: Record<string, unknown> } {
-  const file = resolve(process.cwd(), 's1route.config.json');
+  const file = resolve(process.cwd(), 'oneroute.config.json');
   if (!existsSync(file)) return {};
   try {
     return JSON.parse(readFileSync(file, 'utf8'));
   } catch (err) {
-    throw new Error(`Invalid s1route.config.json: ${(err as Error).message}`);
+    throw new Error(`Invalid oneroute.config.json: ${(err as Error).message}`);
   }
 }
 const userConfig = loadUserConfig();

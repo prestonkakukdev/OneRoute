@@ -34,7 +34,7 @@ export function parseArenaPage(html: string): ArenaRating[] {
 }
 
 export async function fetchArenaCategory(path: string, fetchImpl: typeof fetch = fetch): Promise<ArenaRating[]> {
-  const res = await fetchImpl(`https://arena.ai/leaderboard/${path}`, { headers: { 'User-Agent': 'Mozilla/5.0 system1-route' } });
+  const res = await fetchImpl(`https://arena.ai/leaderboard/${path}`, { headers: { 'User-Agent': 'Mozilla/5.0 oneroute' } });
   if (!res.ok) throw new Error(`LMArena ${path} returned ${res.status}`);
   return parseArenaPage(await res.text());
 }

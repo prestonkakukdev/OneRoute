@@ -98,7 +98,7 @@ describe('feedback inferred from the next message', () => {
   });
 
   it('treats ratings recorded before feedback sources existed as the user\'s own', () => {
-    const path = join(mkdtempSync(join(tmpdir(), 's1route-')), 'db.sqlite');
+    const path = join(mkdtempSync(join(tmpdir(), 'oneroute-')), 'db.sqlite');
     const before = new Store(path);
     before.recordOutcome({ requestId: 'r1', modelId: MODEL, effort: 'low', status: 'ok' });
     before.recordFeedback('r1', true);

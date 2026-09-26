@@ -41,7 +41,7 @@ function cn(...inputs: ClassValue[]) {
  *
  *   <AiPromptInput onSubmit={(value, selection) => console.log(value, selection)} />
  *
- * System1 Route additions (all optional; defaults keep the original behaviour):
+ * OneRoute additions (all optional; defaults keep the original behaviour):
  *   actionsMenu      custom content for the + menu (use PromptMenuItem for items)
  *   toolbarStart     extra toolbar buttons after the + menu (use PromptToolbarButton)
  *   beforeInput      content above the textarea, e.g. attachment previews
@@ -416,7 +416,7 @@ function resolveSelection(
   }
 }
 
-/** System1 Route addition: a model with nothing to configure gets no edit button. */
+/** OneRoute addition: a model with nothing to configure gets no edit button. */
 function hasModelOptions(model: AiModel) {
   return (
     (model.efforts?.length ?? 0) > 0 ||
@@ -1400,7 +1400,7 @@ export const DEFAULT_PLACEHOLDERS = [
 /** Default models — same set as `DEFAULT_AI_MODELS` from AI Model Selector. */
 export const DEFAULT_MODELS: AiModel[] = DEFAULT_AI_MODELS
 
-/** System1 Route addition: an extra removable chip in the active-tools row. */
+/** OneRoute addition: an extra removable chip in the active-tools row. */
 export type AiPromptActiveTool = {
   key: string
   label: string
@@ -1472,21 +1472,21 @@ export interface AiPromptInputProps {
   onDictationChange?: (listening: boolean) => void
   /** Fires when talk-with-AI voice mode starts or stops. */
   onVoiceChange?: (active: boolean) => void
-  /** System1 Route: custom + menu content (replaces the default items). */
+  /** OneRoute: custom + menu content (replaces the default items). */
   actionsMenu?: (close: () => void) => React.ReactNode
-  /** System1 Route: extra toolbar buttons after the + menu. */
+  /** OneRoute: extra toolbar buttons after the + menu. */
   toolbarStart?: React.ReactNode
-  /** System1 Route: content above the textarea (e.g. attachment previews). */
+  /** OneRoute: content above the textarea (e.g. attachment previews). */
   beforeInput?: React.ReactNode
-  /** System1 Route: extra removable chips in the active-tools row. */
+  /** OneRoute: extra removable chips in the active-tools row. */
   activeTools?: AiPromptActiveTool[]
-  /** System1 Route: allow sending with an empty prompt (e.g. attachments only). */
+  /** OneRoute: allow sending with an empty prompt (e.g. attachments only). */
   canSubmit?: boolean
-  /** System1 Route: files pasted into the prompt. */
+  /** OneRoute: files pasted into the prompt. */
   onPasteFiles?: (files: File[]) => void
-  /** System1 Route: show the dictation (mic) button. Defaults to true. */
+  /** OneRoute: show the dictation (mic) button. Defaults to true. */
   showMic?: boolean
-  /** System1 Route: offer voice mode on the action button when empty. Defaults to true. */
+  /** OneRoute: offer voice mode on the action button when empty. Defaults to true. */
   showVoice?: boolean
   /** Extra classes on the shell. */
   className?: string
@@ -1823,7 +1823,7 @@ function actionsItemClass(active = false) {
   )
 }
 
-/** System1 Route addition: a + menu item styled like the built-in ones. */
+/** OneRoute addition: a + menu item styled like the built-in ones. */
 export function PromptMenuItem({
   icon,
   label,
@@ -1868,7 +1868,7 @@ export function PromptMenuItem({
   )
 }
 
-/** System1 Route addition: separator and group label for custom + menus. */
+/** OneRoute addition: separator and group label for custom + menus. */
 export function PromptMenuSeparator() {
   return <div role="separator" className="bg-border my-1.5 h-px" />
 }
@@ -1881,7 +1881,7 @@ export function PromptMenuLabel({ children }: { children: React.ReactNode }) {
   )
 }
 
-/** System1 Route addition: a toolbar icon button styled like the + button. */
+/** OneRoute addition: a toolbar icon button styled like the + button. */
 export const PromptToolbarButton = React.forwardRef<
   HTMLButtonElement,
   Omit<HTMLMotionProps<"button">, "children"> & { children: React.ReactNode }

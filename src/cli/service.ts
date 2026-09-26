@@ -1,4 +1,4 @@
-// `s1route service`: runs the router in the background on macOS (a launchd agent). It starts at login,
+// `oneroute service`: runs the router in the background on macOS (a launchd agent). It starts at login,
 // comes back after crashes, restarts itself when the code changes and rebuilds the app when the
 // interface changes (scripts/service.mjs does the supervising).
 
@@ -8,17 +8,17 @@ import { homedir, userInfo } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-export const SERVICE_LABEL = 'com.system1route.service';
+export const SERVICE_LABEL = 'com.oneroute.service';
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const PLIST = join(homedir(), 'Library', 'LaunchAgents', `${SERVICE_LABEL}.plist`);
-export const LOG_FILE = join(homedir(), 'Library', 'Logs', 'System1Route', 'service.log');
+export const LOG_FILE = join(homedir(), 'Library', 'Logs', 'OneRoute', 'service.log');
 const domain = () => `gui/${userInfo().uid}`;
 const target = () => `${domain()}/${SERVICE_LABEL}`;
 
 const xml = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
 function requireMac(): void {
-  if (process.platform !== 'darwin') throw new Error('The background service uses launchd and is macOS only. Run `s1route serve` instead.');
+  if (process.platform !== 'darwin') throw new Error('The background service uses launchd and is macOS only. Run `oneroute serve` instead.');
 }
 
 // A stable node path: Homebrew's /opt/homebrew/bin/node survives upgrades, the versioned Cellar path does not.
@@ -99,7 +99,7 @@ async function waitHealthy(port: number, seconds: number): Promise<boolean> {
 }
 
 // Agents from before the project was renamed; install replaces them.
-const LEGACY_LABELS = ['com.modelrouter.service'];
+const LEGACY_LABELS = ['com.modelrouter.service', 'com.system1route.service'];
 
 function removeLegacyAgents(): void {
   for (const label of LEGACY_LABELS) {
@@ -119,7 +119,7 @@ export async function installService(port: number): Promise<void> {
   // A service that was just stopped can take a moment to let go of the port.
   for (let i = 0; i < 10 && (await healthy(port)); i++) await new Promise((r) => setTimeout(r, 500));
   if (await healthy(port)) {
-    throw new Error(`Something is already answering on port ${port} (a \`s1route serve\` or dev server?). Stop it first, then install again.`);
+    throw new Error(`Something is already answering on port ${port} (a \`oneroute serve\` or dev server?). Stop it first, then install again.`);
   }
   mkdirSync(dirname(PLIST), { recursive: true });
   mkdirSync(dirname(LOG_FILE), { recursive: true });
@@ -129,7 +129,7 @@ export async function installService(port: number): Promise<void> {
   console.log(`Installed ${SERVICE_LABEL} (${PLIST})`);
   console.log(`Starting… (first start builds the app)`);
   if (await waitHealthy(port, 45)) console.log(`Running on http://localhost:${port}/ — it starts at login and restarts itself after crashes and code changes.`);
-  else console.log(`Not answering yet. Check \`s1route service logs\` (${LOG_FILE}).`);
+  else console.log(`Not answering yet. Check \`oneroute service logs\` (${LOG_FILE}).`);
 }
 
 export function uninstallService(): void {
@@ -142,24 +142,24 @@ export function uninstallService(): void {
 
 export async function startService(port: number): Promise<void> {
   requireMac();
-  if (!existsSync(PLIST)) throw new Error('The service is not installed. Run `s1route service install`.');
+  if (!existsSync(PLIST)) throw new Error('The service is not installed. Run `oneroute service install`.');
   if (!serviceState().loaded) launchctl(['bootstrap', domain(), PLIST]);
   else launchctl(['kickstart', target()]);
-  console.log((await waitHealthy(port, 45)) ? `Running on http://localhost:${port}/` : `Started, but not answering yet. See \`s1route service logs\`.`);
+  console.log((await waitHealthy(port, 45)) ? `Running on http://localhost:${port}/` : `Started, but not answering yet. See \`oneroute service logs\`.`);
 }
 
 export function stopService(): void {
   requireMac();
   // bootout stops it and keeps launchd from restarting it; it comes back at next login (or `service start`).
   launchctl(['bootout', target()], true);
-  console.log('Stopped until the next login (or `s1route service start`).');
+  console.log('Stopped until the next login (or `oneroute service start`).');
 }
 
 export async function restartService(port: number): Promise<void> {
   requireMac();
   if (!serviceState().loaded) return startService(port);
   launchctl(['kickstart', '-k', target()]);
-  console.log((await waitHealthy(port, 45)) ? `Restarted: http://localhost:${port}/` : 'Restarted, but not answering yet. See `s1route service logs`.');
+  console.log((await waitHealthy(port, 45)) ? `Restarted: http://localhost:${port}/` : 'Restarted, but not answering yet. See `oneroute service logs`.');
 }
 
 export async function printStatus(port: number): Promise<void> {

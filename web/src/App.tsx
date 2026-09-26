@@ -386,7 +386,9 @@ export default function App() {
     <div className="grid h-full grid-rows-[auto_1fr]">
       <header className="app-header flex items-center gap-2.5 border-b py-2 pr-3 pl-2.5">
         <PanelToggle side="left" open={sidebarOpen} onClick={() => setSidebarOpen((v) => !v)} />
-        <h1 className="text-sm font-semibold tracking-tight">System1 Route</h1>
+        <h1 className="font-display text-[17px] leading-none font-semibold tracking-[-0.035em]">
+          One<span className="text-foreground/60 font-normal">Route</span>
+        </h1>
         <Chip tone="soft">{userTurns ? `${userTurns} turn${userTurns > 1 ? 's' : ''}` : 'new session'}</Chip>
         <div className="flex-1" />
         <button

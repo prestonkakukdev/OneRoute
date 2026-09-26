@@ -1,6 +1,6 @@
-# System1 Route
+# OneRoute
 
-[![CI](https://github.com/prestonkakukdev/System1-Route/actions/workflows/ci.yml/badge.svg)](https://github.com/prestonkakukdev/System1-Route/actions/workflows/ci.yml)
+[![CI](https://github.com/prestonkakukdev/OneRoute/actions/workflows/ci.yml/badge.svg)](https://github.com/prestonkakukdev/OneRoute/actions/workflows/ci.yml)
 [![License: Apache 2.0](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 
 Routes every request to the best model and reasoning effort for the job, so you get frontier answers when they
@@ -34,8 +34,8 @@ You need **Node.js 22.13 or newer**, an **[OpenRouter](https://openrouter.ai/key
 the models) and a **Jev / [TypeSafe](https://typesafe.ai) API key** (it reads the requests).
 
 ```bash
-git clone https://github.com/prestonkakukdev/System1-Route.git
-cd System1-Route
+git clone https://github.com/prestonkakukdev/OneRoute.git
+cd OneRoute
 npm install
 npm run setup      # asks for your two keys, builds everything and checks the keys work
 npm start          # then open http://localhost:8787
@@ -55,7 +55,7 @@ Install page as app) to get it as its own app. On Linux or Windows, run `npm sta
 
 **Use it from code.** Point any OpenAI-compatible client at `http://localhost:8787/v1` with model `auto` (see [API](#api)).
 
-**Put `s1route` on your PATH** (optional): `npm link`. Otherwise use `npm run dev -- <command>`.
+**Put `oneroute` on your PATH** (optional): `npm link`. Otherwise use `npm run dev -- <command>`.
 
 ### Updating
 
@@ -77,7 +77,7 @@ chosen model). Set `ROUTER_STORE_PROMPTS=false` to keep prompt text out of the r
 ## The app
 
 ```bash
-s1route ui          # starts the router and opens http://127.0.0.1:8787/ (skip if the service is running)
+oneroute ui          # starts the router and opens http://127.0.0.1:8787/ (skip if the service is running)
 ```
 
 **Keep it running (macOS):**
@@ -85,12 +85,12 @@ s1route ui          # starts the router and opens http://127.0.0.1:8787/ (skip i
 ```bash
 npm run service -- install   # background service: starts at login, restarts after crashes
 npm run service -- status    # installed / running / answering
-npm run service -- logs -f   # follow ~/Library/Logs/System1Route/service.log
+npm run service -- logs -f   # follow ~/Library/Logs/OneRoute/service.log
 npm run service -- restart   # after `npm install` (new packages)
 npm run service -- stop      # until next login;  uninstall  removes it
 ```
 
-The service (a launchd agent, `com.system1route.service`) runs `scripts/service.mjs`, which restarts the router when
+The service (a launchd agent, `com.oneroute.service`) runs `scripts/service.mjs`, which restarts the router when
 it crashes (backoff up to 30s) or when `src/`, `data/`, `.env` or `package.json` change, and rebuilds the app when
 `web/` changes. So edits and `git pull`s go live on their own; only new npm packages need `service restart`.
 
@@ -121,11 +121,11 @@ every model can read it). Attachments stay in the conversation, so follow-up que
 ## Use it
 
 ```bash
-s1route chat                      # terminal chat; each turn is routed. /why /good /bad /mode best
-s1route route "fix this race condition in my Go worker pool"   # show the decision without running it
-s1route serve                     # OpenAI-compatible gateway on http://127.0.0.1:8787/v1
-s1route models                    # the capability database
-s1route stats                     # requests, cost, latency, feedback per model
+oneroute chat                      # terminal chat; each turn is routed. /why /good /bad /mode best
+oneroute route "fix this race condition in my Go worker pool"   # show the decision without running it
+oneroute serve                     # OpenAI-compatible gateway on http://127.0.0.1:8787/v1
+oneroute models                    # the capability database
+oneroute stats                     # requests, cost, latency, feedback per model
 ```
 
 ### API
@@ -194,10 +194,10 @@ Weights multiply how much each factor counts in the score: 0.5 = half as much, 2
 them as plain choices (Doesn't matter much / Matters less / Normal / Matters more / Matters a lot).
 
 ```bash
-s1route chat --pref quality=3 --pref open=prefer --pref avoid=x-ai
+oneroute chat --pref quality=3 --pref open=prefer --pref avoid=x-ai
 ```
 ```json
-// s1route.config.json (your defaults)
+// oneroute.config.json (your defaults)
 { "mode": "balanced", "preferences": { "qualityWeight": 2, "openWeights": "prefer" } }
 ```
 Per request (API): `"router": { "preferences": { "quality_weight": 3, "open_weights": "only" } }`.
@@ -212,11 +212,11 @@ The repo ships the database as `data/catalog.json`, so you don't need to build i
 yourself (needs a free [Artificial Analysis](https://artificialanalysis.ai) API key in `ARTIFICIAL_ANALYSIS_API_KEY`):
 
 ```bash
-s1route ingest               # steps 1-2: rebuild from all sources (~20s); --cache reuses downloads
-s1route catalog export       # write the result to data/catalog.json (to share it, e.g. in a pull request)
-s1route profiles             # step 3: a strong LLM writes each model's profile (only changed models)
-s1route models list --sort computer_use
-s1route models show anthropic/claude-opus-5.5   # every capability at every effort, with trust and sources
+oneroute ingest               # steps 1-2: rebuild from all sources (~20s); --cache reuses downloads
+oneroute catalog export       # write the result to data/catalog.json (to share it, e.g. in a pull request)
+oneroute profiles             # step 3: a strong LLM writes each model's profile (only changed models)
+oneroute models list --sort computer_use
+oneroute models show anthropic/claude-opus-5.5   # every capability at every effort, with trust and sources
 ```
 
 **Sources** (every raw number is kept in `benchmark_results` with its source, date and whether it is independent):
@@ -253,8 +253,8 @@ All knobs live in `src/taxonomy.ts` (and a few in `src/config.ts` / `.env`):
 | `ROUTER_MIN_TASK_CONFIDENCE`, `ROUTER_TIE_MARGIN` | When to escalate |
 
 ```bash
-s1route bench bench/sample.txt           # route a prompt set in every mode; no model is called
-s1route route --json "..."               # full decision, including Jev's raw answers and all candidates
+oneroute bench bench/sample.txt           # route a prompt set in every mode; no model is called
+oneroute route --json "..."               # full decision, including Jev's raw answers and all candidates
 ```
 
 ## Development

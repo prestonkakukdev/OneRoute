@@ -1,5 +1,5 @@
 {
-  "name": "system1-route",
+  "name": "oneroute",
   "version": "0.1.0",
   "description": "Routes every request to the best model and reasoning effort: Jev classifies the task, a deterministic optimizer picks from a capability database. OpenAI-compatible API, CLI and chat app.",
   "keywords": [
@@ -10,13 +10,13 @@
     "openai-compatible",
     "ai"
   ],
-  "homepage": "https://github.com/prestonkakukdev/System1-Route#readme",
+  "homepage": "https://github.com/prestonkakukdev/OneRoute#readme",
   "bugs": {
-    "url": "https://github.com/prestonkakukdev/System1-Route/issues"
+    "url": "https://github.com/prestonkakukdev/OneRoute/issues"
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/prestonkakukdev/System1-Route.git"
+    "url": "git+https://github.com/prestonkakukdev/OneRoute.git"
   },
   "license": "Apache-2.0",
   "type": "module",
@@ -25,7 +25,7 @@
     "node": ">=22.13"
   },
   "bin": {
-    "s1route": "dist/cli/index.js"
+    "oneroute": "dist/cli/index.js"
   },
   "scripts": {
     "dev": "tsx src/cli/index.ts",

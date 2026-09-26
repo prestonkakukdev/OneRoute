@@ -1,6 +1,6 @@
 {
-  "name": "System1 Route",
-  "short_name": "S1 Route",
+  "name": "OneRoute",
+  "short_name": "OneRoute",
   "description": "Jev reads each request; the router picks the model and reasoning effort.",
   "id": "/",
   "start_url": "/",
