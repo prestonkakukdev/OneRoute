@@ -23,6 +23,7 @@ import { loadCases, runBench, summarize, writeRows } from '../bench.js';
 import { fetchModels } from '../providers/openrouter.js';
 import { Executor } from '../gateway/execute.js';
 import { appBuilt, createApp } from '../gateway/server.js';
+import { installService, printStatus, restartService, showLogs, startService, stopService, uninstallService } from './service.js';
 import { readSse } from '../gateway/sse.js';
 import { explainDecision, summaryLine } from '../router/explain.js';
 import { RoutingError } from '../router/optimizer.js';
@@ -524,6 +525,31 @@ program
     }
     process.exitCode = failed ? 1 : 0;
   });
+
+const service = program
+  .command('service')
+  .description('Run the router in the background on macOS: starts at login, restarts after crashes and code changes');
+const portOpt = ['-p, --port <port>', 'port', parseNumber, config.port] as const;
+service
+  .command('install')
+  .description('Install and start the background service')
+  .option(...portOpt)
+  .action((opts: { port: number }) => installService(opts.port));
+service.command('uninstall').description('Stop and remove the background service').action(() => uninstallService());
+service.command('start').description('Start the installed service').option(...portOpt).action((opts: { port: number }) => startService(opts.port));
+service.command('stop').description('Stop the service until the next login').action(() => stopService());
+service
+  .command('restart')
+  .description('Restart the service (needed after installing new npm packages)')
+  .option(...portOpt)
+  .action((opts: { port: number }) => restartService(opts.port));
+service.command('status').description('Is it installed, running and answering?').option(...portOpt).action((opts: { port: number }) => printStatus(opts.port));
+service
+  .command('logs')
+  .description('Show the service log')
+  .option('-n, --lines <n>', 'lines', parseNumber, 60)
+  .option('-f, --follow', 'keep following')
+  .action((opts: { lines: number; follow?: boolean }) => showLogs(opts.lines, Boolean(opts.follow)));
 
 program.parseAsync().catch((err: unknown) => {
   console.error(red(err instanceof RoutingError ? err.message : ((err as Error).stack ?? String(err))));

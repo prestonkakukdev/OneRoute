@@ -20,7 +20,8 @@
     "web:dev": "vite --config web/vite.config.ts",
     "web:build": "vite build --config web/vite.config.ts",
     "web:typecheck": "tsc -p web/tsconfig.json",
-    "icons": "node web/scripts/icons.mjs"
+    "icons": "node web/scripts/icons.mjs",
+    "service": "tsx src/cli/index.ts service"
   },
   "dependencies": {
     "@hono/node-server": "^2.1.1",

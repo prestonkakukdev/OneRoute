@@ -42,6 +42,20 @@ npm run web:build   # builds the interface (web/ -> web/dist); the router serves
 mrouter ui          # starts the router and opens http://127.0.0.1:8787/
 ```
 
+**Keep it running (macOS):**
+
+```bash
+npm run service -- install   # background service: starts at login, restarts after crashes
+npm run service -- status    # installed / running / answering
+npm run service -- logs -f   # follow ~/Library/Logs/ModelRouter/service.log
+npm run service -- restart   # after `npm install` (new packages)
+npm run service -- stop      # until next login;  uninstall  removes it
+```
+
+The service (a launchd agent, `com.modelrouter.service`) runs `scripts/service.mjs`, which restarts the router when
+it crashes (backoff up to 30s) or when `src/`, `data/`, `.env` or `package.json` change, and rebuilds the app when
+`web/` changes. So edits and `git pull`s go live on their own; only new npm packages need `service restart`.
+
 **Put it in the Dock:** open http://localhost:8787 in Safari and choose File → Add to Dock (or in Chrome: ⋮ →
 Cast, save and share → Install page as app). It opens in its own window with its own icon; the router must be running.
 
