@@ -1,7 +1,49 @@
 import { z } from 'zod';
 import { config } from '../config.js';
 import { chatCompletion } from '../providers/openrouter.js';
+import { EFFORTS, type Effort, type Mode } from '../taxonomy.js';
 import type { Candidate, ModelRecord, TaskProfile } from '../types.js';
+
+const SHORTLIST_SIZE = 5;
+
+// What the escalation model may choose from, by mode. In Cheap mode it only sees options that score close
+// to the optimizer's own pick and cost at most a few times as much, so it can settle a genuinely unclear
+// case without trading up to a much pricier model for a few points of estimated success. Balanced and Best
+// see the top options as before.
+export const ESCALATION_WINDOW: Record<Mode, { scoreWithin: number; maxCostRatio: number }> = {
+  cheap: { scoreWithin: 0.25, maxCostRatio: 3 },
+  balanced: { scoreWithin: Infinity, maxCostRatio: Infinity },
+  best: { scoreWithin: Infinity, maxCostRatio: Infinity },
+};
+
+// What each mode asks the escalation model to optimise for.
+const MODE_GOAL: Record<Mode, string> = {
+  cheap:
+    'The user chose CHEAP mode: keep cost low. Prefer the cheapest candidate that is likely to answer well; choose a pricier one only if the cheaper ones would probably get this request wrong. Waiting time barely matters.',
+  balanced: 'The user chose BALANCED mode: weigh answer quality first, then cost and speed.',
+  best: 'The user chose BEST mode: answer quality comes first; cost matters little.',
+};
+
+// Best effort level per model, in rank order, limited to the mode's window around the optimizer's pick.
+// On a retry, the answer the user just rejected (same model at the same or a lower effort) is left out.
+export function escalationShortlist(ranked: Candidate[], mode: Mode, retry?: { modelId: string; effort: Effort }): Candidate[] {
+  const window = ESCALATION_WINDOW[mode];
+  const seen = new Set<string>();
+  const out: Candidate[] = [];
+  for (const c of ranked) {
+    if (seen.has(c.modelId)) continue;
+    if (retry && c.modelId === retry.modelId && EFFORTS.indexOf(c.effort as never) <= EFFORTS.indexOf(retry.effort as never)) continue;
+    const top = out[0];
+    if (top) {
+      if (c.utility < top.utility - Math.abs(top.utility) * window.scoreWithin) continue;
+      if (c.estCostUsd > top.estCostUsd * window.maxCostRatio) continue;
+    }
+    seen.add(c.modelId);
+    out.push(c);
+    if (out.length === SHORTLIST_SIZE) break;
+  }
+  return out;
+}
 
 export function escalationReasons(task: TaskProfile, ranked: Candidate[], value: number): string[] {
   const reasons: string[] = [];
@@ -48,10 +90,12 @@ export async function escalateWithLlm(
   models: Map<string, ModelRecord>,
   reasons: string[],
   llm: typeof chatCompletion = chatCompletion,
+  mode: Mode = 'balanced',
 ): Promise<EscalationPick> {
   const lines = shortlist.map((c, i) => {
     const m = models.get(c.modelId)!;
-    return `[${i}] ${c.effort} effort | est. success ${(c.pSuccess * 100).toFixed(0)}% | est. cost $${c.estCostUsd.toFixed(4)} | est. ${c.estLatencyS.toFixed(1)}s\n    ${modelProfile(m)}`;
+    const tag = i === 0 ? ' | router pick for this mode' : '';
+    return `[${i}] ${c.effort} effort | est. success ${(c.pSuccess * 100).toFixed(0)}% | est. cost $${c.estCostUsd.toFixed(4)} | est. ${c.estLatencyS.toFixed(1)}s${tag}\n    ${modelProfile(m)}`;
   });
   const top = (d: Record<string, number>) =>
     Object.entries(d)
@@ -61,7 +105,8 @@ export async function escalateWithLlm(
       .join(', ');
   const prompt = [
     'You are the escalation step of an LLM router. The fast classifier was unsure, so pick the best candidate for this request.',
-    'Weigh answer quality first, then cost and speed. Reply with JSON only.',
+    MODE_GOAL[mode],
+    'Reply with JSON only.',
     '',
     `Why escalated: ${reasons.join('; ')}`,
     `Classifier guesses - task type: ${top(task.taskType.probabilities)}; difficulty (0-4): ${top(task.difficulty.probabilities)}`,
@@ -108,8 +153,10 @@ export async function escalateWithLlm(
   return { index: parsed.candidate, rationale: parsed.rationale };
 }
 
-// Fallback when the escalation model is unavailable: among the near-top options, prefer quality.
-export function conservativePick(shortlist: Candidate[]): number {
+// Fallback when the escalation model is unavailable: among the near-top options, prefer quality, except in
+// Cheap mode, where the optimizer's own pick stands.
+export function conservativePick(shortlist: Candidate[], mode: Mode = 'balanced'): number {
+  if (mode === 'cheap') return 0;
   let best = 0;
   shortlist.slice(0, 3).forEach((c, i) => {
     if (c.pSuccess > shortlist[best]!.pSuccess) best = i;

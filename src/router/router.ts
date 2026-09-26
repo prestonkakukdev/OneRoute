@@ -7,7 +7,7 @@ import type { Store } from '../db/store.js';
 import { chatCompletion } from '../providers/openrouter.js';
 import { EFFORTS, type Effort, type TaskType } from '../taxonomy.js';
 import type { Candidate, ChatRequest, Escalation, Preferences, RequestFacts, RouteDecision, RoutePrefs, TaskProfile } from '../types.js';
-import { conservativePick, escalateWithLlm, escalationReasons } from './escalate.js';
+import { conservativePick, escalateWithLlm, escalationReasons, escalationShortlist } from './escalate.js';
 import { requirementWeights } from './estimate.js';
 import { rankCandidates, successValue } from './optimizer.js';
 
@@ -16,7 +16,6 @@ export interface RouterDeps {
   llm: typeof chatCompletion;
 }
 
-const SHORTLIST_SIZE = 5;
 const IMPLICIT_REJECT_THRESHOLD = 0.75;
 const IMPLICIT_CONFIRM_THRESHOLD = 0.8;
 const UNDERSPECIFIED_THRESHOLD = 0.8;
@@ -28,21 +27,6 @@ function asClarification(task: TaskProfile): TaskProfile {
     confidence: 1,
   });
   return { ...task, difficulty: level(5, 1), reasoningDepth: level(4, 0), outputLength: level(4, 0) };
-}
-
-// Best effort level per model, in rank order. On a retry, the answer the user just rejected (same model at the
-// same or a lower effort) is left out, so the escalation model cannot pick it again.
-function shortlist(ranked: Candidate[], retry?: { modelId: string; effort: Effort }): Candidate[] {
-  const seen = new Set<string>();
-  const out: Candidate[] = [];
-  for (const c of ranked) {
-    if (seen.has(c.modelId)) continue;
-    if (retry && c.modelId === retry.modelId && EFFORTS.indexOf(c.effort as never) <= EFFORTS.indexOf(retry.effort as never)) continue;
-    seen.add(c.modelId);
-    out.push(c);
-    if (out.length === SHORTLIST_SIZE) break;
-  }
-  return out;
 }
 
 export const DEFAULT_PREFERENCES: Preferences = {
@@ -174,19 +158,21 @@ export class Router {
     let chosen = ranked[0]!;
     let escalation: Escalation | null = null;
     const reasons = prefs.escalation === 'off' ? [] : escalationReasons(task, ranked, successValue(task, facts, prefs));
-    if (reasons.length) {
-      const list = shortlist(ranked, retry);
+    // Only options close to the optimizer's pick (by mode) are eligible; with a single one there is nothing
+    // to settle, so the extra LLM call is skipped.
+    const list = reasons.length ? escalationShortlist(ranked, prefs.mode, retry) : [];
+    if (list.length > 1) {
       const t0 = performance.now();
       try {
-        const pick = await escalateWithLlm(text, task, list, new Map(models.map((m) => [m.id, m])), reasons, this.deps.llm);
+        const pick = await escalateWithLlm(text, task, list, new Map(models.map((m) => [m.id, m])), reasons, this.deps.llm, prefs.mode);
         chosen = list[pick.index]!;
         escalation = { reasons, by: 'llm', rationale: pick.rationale, latencyMs: performance.now() - t0 };
       } catch (err) {
-        chosen = list[conservativePick(list)]!;
+        chosen = list[conservativePick(list, prefs.mode)]!;
         escalation = {
           reasons,
           by: 'conservative',
-          rationale: `escalation model unavailable (${(err as Error).message}); picked the highest-quality near-top option`,
+          rationale: `escalation model unavailable (${(err as Error).message}); ${prefs.mode === 'cheap' ? 'kept the cheapest near-top option' : 'picked the highest-quality near-top option'}`,
           latencyMs: performance.now() - t0,
         };
       }
