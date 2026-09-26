@@ -979,7 +979,14 @@ const ModelSelectorContent = React.forwardRef<
             zIndex: 50,
             ...style,
           }}
-          className={cn("flex origin-top-left items-start gap-3", className)}
+          // Opening upward, the list stays pinned to the bottom edge and the side panel grows upward
+          // from it: a taller description must not move the list under the pointer (that made
+          // hovering between two items flicker as each one's description resized the popover).
+          className={cn(
+            "flex gap-3",
+            sideProp === "top" ? "origin-bottom-left items-end" : "origin-top-left items-start",
+            className
+          )}
           {...props}
         >
           <div
