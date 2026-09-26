@@ -11,7 +11,8 @@ const marked = new Marked({
     code({ text, lang }) {
       const l = (lang || '').split(/\s/)[0] ?? '';
       const html = l && hljs.getLanguage(l) ? hljs.highlight(text, { language: l, ignoreIllegals: true }).value : esc(text);
-      return `<pre><code class="hljs${l ? ` language-${esc(l)}` : ''}">${html}</code></pre>`;
+      // Copy buttons are wired up by the Answer component (event delegation on [data-copy-code]).
+      return `<div class="code-block"><div class="code-bar"><span>${esc(l || 'code')}</span><button type="button" class="code-copy" data-copy-code>Copy</button></div><pre><code class="hljs${l ? ` language-${esc(l)}` : ''}">${html}</code></pre></div>`;
     },
   },
 });

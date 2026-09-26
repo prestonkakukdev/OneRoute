@@ -1,5 +1,5 @@
-import { motion } from 'framer-motion';
-import { GlobeIcon, SparklesIcon } from 'lucide-react';
+import { AnimatePresence, motion } from 'framer-motion';
+import { CheckIcon, CopyIcon, GlobeIcon, SparklesIcon } from 'lucide-react';
 import * as React from 'react';
 import type { Decision, Done } from '@/lib/api';
 import type { Attachment } from '@/lib/attachments';
@@ -11,6 +11,9 @@ import { Chip } from './chip';
 
 export interface Turn {
   id: string;
+  /** What the user typed (may be empty when only files were sent). */
+  text: string;
+  /** Display label: the text, or the attached file names. */
   prompt: string;
   attachments: Attachment[];
   decision?: Decision;
@@ -48,10 +51,77 @@ export function UserMessage({ turn }: { turn: Turn }) {
   );
 }
 
+export async function copyText(text: string): Promise<boolean> {
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch {
+    // Clipboard API refused (e.g. the window isn't focused): fall back to a hidden textarea + copy command.
+    const area = document.createElement('textarea');
+    area.value = text;
+    area.setAttribute('readonly', '');
+    area.style.cssText = 'position:fixed;top:0;left:0;opacity:0;pointer-events:none';
+    document.body.append(area);
+    area.select();
+    try {
+      return document.execCommand('copy');
+    } catch {
+      return false;
+    } finally {
+      area.remove();
+    }
+  }
+}
+
 const Answer = React.memo(function Answer({ text }: { text: string }) {
   const html = React.useMemo(() => renderMarkdown(text), [text]);
-  return <div className="prose-answer" dangerouslySetInnerHTML={{ __html: html }} />;
+  // Code-block copy buttons come from the Markdown renderer; one delegated handler serves them all.
+  const onClick = async (e: React.MouseEvent) => {
+    const button = (e.target as HTMLElement).closest<HTMLButtonElement>('[data-copy-code]');
+    if (!button) return;
+    e.stopPropagation();
+    const code = button.closest('.code-block')?.querySelector('code')?.textContent ?? '';
+    button.textContent = (await copyText(code)) ? 'Copied' : 'Copy failed';
+    window.setTimeout(() => (button.textContent = 'Copy'), 1500);
+  };
+  return <div className="prose-answer" onClick={onClick} dangerouslySetInnerHTML={{ __html: html }} />;
 });
+
+function CopyButton({ text }: { text: string }) {
+  const [state, setState] = React.useState<'idle' | 'copied' | 'failed'>('idle');
+  React.useEffect(() => {
+    if (state === 'idle') return;
+    const id = window.setTimeout(() => setState('idle'), 1500);
+    return () => window.clearTimeout(id);
+  }, [state]);
+  return (
+    <motion.button
+      type="button"
+      aria-label={state === 'copied' ? 'Copied' : 'Copy response'}
+      title="Copy response"
+      onClick={async (e) => {
+        e.stopPropagation();
+        setState((await copyText(text)) ? 'copied' : 'failed');
+      }}
+      whileTap={{ scale: 0.94 }}
+      className="text-muted-foreground hover:bg-muted hover:text-foreground flex h-7 cursor-pointer items-center gap-1.5 rounded-lg px-2 text-xs font-medium transition-colors duration-150"
+    >
+      <AnimatePresence mode="wait" initial={false}>
+        <motion.span
+          key={state}
+          initial={{ opacity: 0, scale: 0.25, filter: 'blur(4px)' }}
+          animate={{ opacity: 1, scale: 1, filter: 'blur(0px)' }}
+          exit={{ opacity: 0, scale: 0.25, filter: 'blur(4px)' }}
+          transition={{ type: 'spring', duration: 0.3, bounce: 0 }}
+          className="flex"
+        >
+          {state === 'copied' ? <CheckIcon className="size-3.5" aria-hidden /> : <CopyIcon className="size-3.5" aria-hidden />}
+        </motion.span>
+      </AnimatePresence>
+      {state === 'copied' ? 'Copied' : state === 'failed' ? 'Copy failed' : 'Copy'}
+    </motion.button>
+  );
+}
 
 export function AssistantMessage({ turn, selected, onSelect }: { turn: Turn; selected: boolean; onSelect: () => void }) {
   const d = turn.decision;
@@ -119,6 +189,11 @@ export function AssistantMessage({ turn, selected, onSelect }: { turn: Turn; sel
         )}
       </div>
       <div className="px-0.5">{body}</div>
+      {turn.answer && (turn.done || turn.error) ? (
+        <div className="mt-2 -ml-1 flex items-center gap-1">
+          <CopyButton text={turn.answer} />
+        </div>
+      ) : null}
     </motion.div>
   );
 }

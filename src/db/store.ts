@@ -130,9 +130,33 @@ CREATE TABLE IF NOT EXISTS sessions (
   effort TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );
+-- Saved conversations from the app. A chat's id is also its routing session id.
+CREATE TABLE IF NOT EXISTS chats (
+  id TEXT PRIMARY KEY,
+  title TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS chat_turns (
+  chat_id TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
+  turn_id TEXT NOT NULL,
+  idx INTEGER NOT NULL,
+  data TEXT NOT NULL, -- the app's turn: prompt, attachments, routing decision, answer, feedback
+  updated_at TEXT NOT NULL,
+  PRIMARY KEY (chat_id, turn_id)
+);
+CREATE INDEX IF NOT EXISTS chats_updated ON chats(updated_at);
 `;
 
 type Row = Record<string, unknown>;
+
+export interface ChatSummary {
+  id: string;
+  title: string;
+  createdAt: string;
+  updatedAt: string;
+  turns: number;
+}
 
 export interface OutcomeInput {
   requestId: string;
@@ -612,6 +636,57 @@ export class Store {
            updated_at = excluded.updated_at, web_at = COALESCE(excluded.web_at, sessions.web_at)`,
       )
       .run(sessionId, modelId, effort, at, usedWeb ? at : null);
+  }
+
+  // --- Saved chats (the app's conversation history) ---------------------------------------------
+
+  listChats(limit = 200): ChatSummary[] {
+    return (
+      this.db
+        .prepare(
+          `SELECT c.id, c.title, c.created_at, c.updated_at, (SELECT COUNT(*) FROM chat_turns t WHERE t.chat_id = c.id) AS turns
+           FROM chats c ORDER BY c.updated_at DESC LIMIT ?`,
+        )
+        .all(limit) as Row[]
+    ).map((r) => ({ id: r.id as string, title: r.title as string, createdAt: r.created_at as string, updatedAt: r.updated_at as string, turns: r.turns as number }));
+  }
+
+  getChat(id: string): { id: string; title: string; createdAt: string; updatedAt: string; turns: unknown[] } | undefined {
+    const chat = this.db.prepare('SELECT * FROM chats WHERE id = ?').get(id) as Row | undefined;
+    if (!chat) return undefined;
+    const turns = (this.db.prepare('SELECT data FROM chat_turns WHERE chat_id = ? ORDER BY idx').all(id) as Row[]).map((r) => JSON.parse(r.data as string));
+    return { id, title: chat.title as string, createdAt: chat.created_at as string, updatedAt: chat.updated_at as string, turns };
+  }
+
+  // Creates the chat on its first turn (titled from that turn); later saves of the same turn replace it in place.
+  saveChatTurn(chatId: string, turnId: string, turn: unknown, title: string): void {
+    const at = now();
+    this.db.exec('BEGIN');
+    try {
+      this.db
+        .prepare('INSERT INTO chats (id, title, created_at, updated_at) VALUES (?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET updated_at = excluded.updated_at')
+        .run(chatId, title.trim().slice(0, 120) || 'New chat', at, at);
+      this.db
+        .prepare(
+          `INSERT INTO chat_turns (chat_id, turn_id, idx, data, updated_at)
+           VALUES (?, ?, (SELECT COUNT(*) FROM chat_turns WHERE chat_id = ?), ?, ?)
+           ON CONFLICT(chat_id, turn_id) DO UPDATE SET data = excluded.data, updated_at = excluded.updated_at`,
+        )
+        .run(chatId, turnId, chatId, JSON.stringify(turn), at);
+      this.db.exec('COMMIT');
+    } catch (err) {
+      this.db.exec('ROLLBACK');
+      throw err;
+    }
+  }
+
+  renameChat(id: string, title: string): boolean {
+    return this.db.prepare('UPDATE chats SET title = ? WHERE id = ?').run(title.trim().slice(0, 120), id).changes > 0;
+  }
+
+  deleteChat(id: string): boolean {
+    this.db.prepare('DELETE FROM chat_turns WHERE chat_id = ?').run(id);
+    return this.db.prepare('DELETE FROM chats WHERE id = ?').run(id).changes > 0;
   }
 
   summary(): Row[] {

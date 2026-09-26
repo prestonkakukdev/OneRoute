@@ -45,6 +45,11 @@ mrouter ui          # starts the router and opens http://127.0.0.1:8787/
 **Put it in the Dock:** open http://localhost:8787 in Safari and choose File → Add to Dock (or in Chrome: ⋮ →
 Cast, save and share → Install page as app). It opens in its own window with its own icon; the router must be running.
 
+Chats are saved in the router's database (`router.db`, tables `chats` and `chat_turns`, attachments included) and
+listed in the left sidebar, where you can reopen, rename or delete them; the address bar keeps the open chat, so a
+refresh brings you back to it. Every answer has a Copy button (and each code block its own). Both sidebars collapse
+from the header buttons.
+
 The interface is React + TypeScript + Tailwind v4 in `web/`, laid out the shadcn way (`web/src/components/ui`,
 `@/` alias, `web/components.json`). The composer is the Motoko `AiPromptInput` component
 (`web/src/components/ui/ai-prompt-input.tsx`); the routing modes use its model selector. The router reads the built

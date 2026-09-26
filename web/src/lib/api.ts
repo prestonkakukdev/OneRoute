@@ -128,3 +128,35 @@ export async function sendFeedback(requestId: string, success: boolean, comment?
   const res = await fetch('/v1/feedback', { method: 'POST', headers: headers(), body: JSON.stringify({ request_id: requestId, success, comment }) });
   return res.ok;
 }
+
+// --- Saved chats ---------------------------------------------------------------------------------
+
+export interface ChatSummary {
+  id: string;
+  title: string;
+  createdAt: string;
+  updatedAt: string;
+  turns: number;
+}
+
+async function json<T>(res: Response): Promise<T> {
+  if (!res.ok) {
+    const err = (await res.json().catch(() => ({}))) as { error?: { message?: string } };
+    throw new Error(err.error?.message ?? `HTTP ${res.status}`);
+  }
+  return (await res.json()) as T;
+}
+
+export const chats = {
+  list: () => fetch('/ui/api/chats', { headers: headers() }).then((r) => json<ChatSummary[]>(r)),
+  get: <T>(id: string) => fetch(`/ui/api/chats/${encodeURIComponent(id)}`, { headers: headers() }).then((r) => json<{ id: string; title: string; turns: T[] }>(r)),
+  saveTurn: (chatId: string, turn: { id: string }, title: string) =>
+    fetch(`/ui/api/chats/${encodeURIComponent(chatId)}/turns/${encodeURIComponent(turn.id)}`, {
+      method: 'PUT',
+      headers: headers(),
+      body: JSON.stringify({ title, turn }),
+    }).then((r) => json<{ ok: true }>(r)),
+  rename: (id: string, title: string) =>
+    fetch(`/ui/api/chats/${encodeURIComponent(id)}`, { method: 'PATCH', headers: headers(), body: JSON.stringify({ title }) }).then((r) => json<{ ok: true }>(r)),
+  remove: (id: string) => fetch(`/ui/api/chats/${encodeURIComponent(id)}`, { method: 'DELETE', headers: headers() }).then((r) => json<{ ok: true }>(r)),
+};

@@ -238,3 +238,32 @@ describe('web search decision', () => {
     expect(webDecision(chat, facts(), resolvePrefs({}), true).on).toBe(false);
   });
 });
+
+describe('saved chats', () => {
+  it('saves turns in order, updates a turn in place, lists, renames and deletes chats', async () => {
+    const { app } = setup();
+    const put = (chatId: string, turn: Record<string, unknown>, title = 'first question') =>
+      app.request(`/ui/api/chats/${chatId}/turns/${turn.id}`, { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ title, turn }) });
+
+    expect((await put('c1', { id: 't1', prompt: 'first question', answer: 'a1' })).status).toBe(200);
+    await put('c1', { id: 't2', prompt: 'second', answer: 'a2' }, 'ignored for an existing chat');
+    await put('c1', { id: 't1', prompt: 'first question', answer: 'a1', feedback: 'Recorded 👍' });
+    await put('c2', { id: 't1', prompt: 'other chat' }, 'other chat');
+
+    const c1 = (await (await app.request('/ui/api/chats/c1')).json()) as { title: string; turns: { id: string; feedback?: string }[] };
+    expect(c1.title).toBe('first question');
+    expect(c1.turns.map((t) => t.id)).toEqual(['t1', 't2']);
+    expect(c1.turns[0]!.feedback).toBe('Recorded 👍');
+
+    const list = (await (await app.request('/ui/api/chats')).json()) as { id: string; turns: number }[];
+    expect(list.map((c) => c.id).sort()).toEqual(['c1', 'c2']);
+    expect(list.find((c) => c.id === 'c1')!.turns).toBe(2);
+
+    await app.request('/ui/api/chats/c1', { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ title: 'Renamed' }) });
+    expect(((await (await app.request('/ui/api/chats/c1')).json()) as { title: string }).title).toBe('Renamed');
+
+    expect((await app.request('/ui/api/chats/c1', { method: 'DELETE' })).status).toBe(200);
+    expect((await app.request('/ui/api/chats/c1')).status).toBe(404);
+    expect((await put('c3', { id: 'mismatch' }).then(() => app.request('/ui/api/chats/c3/turns/other', { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ title: 'x', turn: { id: 'nope' } }) }))).status).toBe(400);
+  });
+});

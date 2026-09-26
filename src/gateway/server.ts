@@ -215,6 +215,27 @@ export function createApp(store: Store, router: Router, executor = new Executor(
     return c.body(readFileSync(path));
   });
 
+  // Saved chats. Turns are stored as the app sends them (including attachments, so a reopened chat can
+  // continue with the same files).
+  const chatTurnSchema = z.object({ title: z.string().max(500), turn: z.object({ id: z.string() }).loose() });
+  app.get('/ui/api/chats', (c) => c.json(store.listChats()));
+  app.get('/ui/api/chats/:id', (c) => {
+    const chat = store.getChat(c.req.param('id'));
+    return chat ? c.json(chat) : openAiError(c, 404, 'Chat not found');
+  });
+  app.put('/ui/api/chats/:id/turns/:turnId', async (c) => {
+    const parsed = chatTurnSchema.safeParse(await c.req.json().catch(() => null));
+    if (!parsed.success || parsed.data.turn.id !== c.req.param('turnId')) return openAiError(c, 400, 'Expected { title, turn } with a matching turn id');
+    store.saveChatTurn(c.req.param('id'), c.req.param('turnId'), parsed.data.turn, parsed.data.title);
+    return c.json({ ok: true });
+  });
+  app.patch('/ui/api/chats/:id', async (c) => {
+    const parsed = z.object({ title: z.string().min(1).max(120) }).safeParse(await c.req.json().catch(() => null));
+    if (!parsed.success) return openAiError(c, 400, 'Expected { title }');
+    return store.renameChat(c.req.param('id'), parsed.data.title) ? c.json({ ok: true }) : openAiError(c, 404, 'Chat not found');
+  });
+  app.delete('/ui/api/chats/:id', (c) => (store.deleteChat(c.req.param('id')) ? c.json({ ok: true }) : openAiError(c, 404, 'Chat not found')));
+
   app.get('/ui/api/models', (c) =>
     c.json(
       store.listModels().map((m) => ({

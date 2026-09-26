@@ -1,7 +1,19 @@
-import { motion } from 'framer-motion';
-import { GlobeIcon, PaperclipIcon, RouteIcon, SlidersHorizontalIcon, SquarePenIcon, TelescopeIcon } from 'lucide-react';
+import { AnimatePresence, motion } from 'framer-motion';
+import {
+  GlobeIcon,
+  PaperclipIcon,
+  PanelLeftCloseIcon,
+  PanelLeftOpenIcon,
+  PanelRightCloseIcon,
+  PanelRightOpenIcon,
+  RouteIcon,
+  SlidersHorizontalIcon,
+  SquarePenIcon,
+  TelescopeIcon,
+} from 'lucide-react';
 import * as React from 'react';
 import { AttachmentTile } from '@/components/attachment-tile';
+import { ChatSidebar } from '@/components/chat-sidebar';
 import { Chip } from '@/components/chip';
 import { Inspector } from '@/components/inspector';
 import { AssistantMessage, type Turn, UserMessage } from '@/components/messages';
@@ -16,7 +28,7 @@ import {
   PromptMenuSeparator,
   PromptToolbarButton,
 } from '@/components/ui/ai-prompt-input';
-import { type ChatMessage, type Mode, type Preferences, sendFeedback, streamChat, type WebSetting } from '@/lib/api';
+import { type ChatMessage, type ChatSummary, chats, type Mode, type Preferences, sendFeedback, streamChat, type WebSetting } from '@/lib/api';
 import { type Attachment, buildContent, MAX_REQUEST_BYTES, prepareFiles } from '@/lib/attachments';
 import { storage } from '@/lib/storage';
 import { cn } from '@/lib/utils';
@@ -39,6 +51,57 @@ const SUGGESTIONS = [
 ];
 
 const newId = () => crypto.randomUUID();
+
+// The model-facing conversation, rebuilt from saved turns (answered turns only; web sources kept, so
+// follow-ups know where facts came from).
+function historyFrom(turns: Turn[]): ChatMessage[] {
+  const out: ChatMessage[] = [];
+  for (const t of turns) {
+    if (!t.answer) continue;
+    const sources = t.done?.sources ?? [];
+    const sourcesText = sources.length ? `\n\nSources (web search):\n${sources.map((s) => `- ${s.title}: ${s.url}`).join('\n')}` : '';
+    out.push({ role: 'user', content: buildContent(t.text ?? t.prompt, t.attachments ?? []) });
+    out.push({ role: 'assistant', content: t.answer + sourcesText });
+  }
+  return out;
+}
+
+const chatIdFromUrl = () => new URLSearchParams(location.search).get('c') ?? undefined;
+function setChatInUrl(id?: string) {
+  const url = new URL(location.href);
+  if (id) url.searchParams.set('c', id);
+  else url.searchParams.delete('c');
+  history.replaceState(null, '', url);
+}
+
+// Inspector width follows the window (360-500px); on narrow windows it sits below the chat instead.
+function useInspectorWidth() {
+  const calc = () => (window.innerWidth < 1024 ? window.innerWidth : Math.round(Math.min(500, Math.max(360, window.innerWidth * 0.34))));
+  const [w, setW] = React.useState(calc);
+  React.useEffect(() => {
+    const onResize = () => setW(calc());
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, []);
+  return w;
+}
+
+function PanelToggle({ open, side, onClick }: { open: boolean; side: 'left' | 'right'; onClick: () => void }) {
+  const Icon = side === 'left' ? (open ? PanelLeftCloseIcon : PanelLeftOpenIcon) : open ? PanelRightCloseIcon : PanelRightOpenIcon;
+  const what = side === 'left' ? 'chats' : 'routing details';
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-label={`${open ? 'Hide' : 'Show'} ${what}`}
+      aria-expanded={open}
+      title={`${open ? 'Hide' : 'Show'} ${what}`}
+      className="text-muted-foreground hover:bg-muted hover:text-foreground flex size-9 cursor-pointer items-center justify-center rounded-xl transition-colors active:scale-[0.96]"
+    >
+      <Icon className="size-4" aria-hidden />
+    </button>
+  );
+}
 
 function prefBits(p: Preferences): string[] {
   const bits: string[] = [];
@@ -91,7 +154,13 @@ export default function App() {
   const [gatewayKey, setGatewayKey] = React.useState(() => storage.get('key', ''));
   const [prefsOpen, setPrefsOpen] = React.useState(false);
 
-  const [sessionId, setSessionId] = React.useState(newId);
+  const [sidebarOpen, setSidebarOpen] = React.useState(() => storage.get('sidebar', window.innerWidth >= 1100));
+  const [inspectorOpen, setInspectorOpen] = React.useState(() => storage.get('inspector', true));
+  const inspectorWidth = useInspectorWidth();
+  const [chatList, setChatList] = React.useState<ChatSummary[]>([]);
+  const [chatError, setChatError] = React.useState<string>();
+
+  const [sessionId, setSessionId] = React.useState(() => chatIdFromUrl() ?? newId());
   const [turns, setTurns] = React.useState<Turn[]>([]);
   const [selectedId, setSelectedId] = React.useState<string>();
   const [status, setStatus] = React.useState<AiPromptSendStatus>('idle');
@@ -109,6 +178,53 @@ export default function App() {
   React.useEffect(() => storage.set('prefs', { ...prefs, web }), [prefs, web]);
   React.useEffect(() => storage.set('dryRun', dryRun), [dryRun]);
   React.useEffect(() => storage.set('escalation', escalation), [escalation]);
+  React.useEffect(() => storage.set('sidebar', sidebarOpen), [sidebarOpen]);
+  React.useEffect(() => storage.set('inspector', inspectorOpen), [inspectorOpen]);
+
+  const refreshChats = React.useCallback(async () => {
+    try {
+      setChatList(await chats.list());
+      setChatError(undefined);
+    } catch (err) {
+      setChatError(`Could not load chats: ${(err as Error).message}`);
+    }
+  }, []);
+
+  const saveTurn = React.useCallback(
+    async (chatId: string, turn: Turn, title: string) => {
+      try {
+        await chats.saveTurn(chatId, turn, title);
+        void refreshChats();
+      } catch (err) {
+        setChatError(`Could not save this chat: ${(err as Error).message}`);
+      }
+    },
+    [refreshChats],
+  );
+
+  const openChat = React.useCallback(async (id: string) => {
+    try {
+      const chat = await chats.get<Turn>(id);
+      history.current = historyFrom(chat.turns);
+      setSessionId(id);
+      setTurns(chat.turns);
+      setSelectedId(chat.turns.at(-1)?.id);
+      setAttachments([]);
+      setAttachError('');
+      setChatInUrl(id);
+      requestAnimationFrame(() => scroller.current && (scroller.current.scrollTop = scroller.current.scrollHeight));
+    } catch (err) {
+      setChatInUrl(undefined);
+      setChatError(`Could not open that chat: ${(err as Error).message}`);
+    }
+  }, []);
+
+  // Reopen the chat in the address bar (so a refresh keeps your place) and load the list.
+  React.useEffect(() => {
+    const id = chatIdFromUrl();
+    if (id) void openChat(id);
+    void refreshChats();
+  }, [openChat, refreshChats]);
 
   const updateTurn = React.useCallback((id: string, patch: (t: Turn) => Partial<Turn>) => {
     setTurns((all) => all.map((t) => (t.id === id ? { ...t, ...patch(t) } : t)));
@@ -159,6 +275,7 @@ export default function App() {
 
   const newChat = () => {
     setSessionId(newId());
+    setChatInUrl(undefined);
     setTurns([]);
     setSelectedId(undefined);
     setAttachments([]);
@@ -181,8 +298,16 @@ export default function App() {
     setStatus('loading');
 
     const id = newId();
-    const turn: Turn = { id, prompt: text || files.map((f) => f.name).join(', '), attachments: files, why: [], answer: '', thinking: false, dryRun };
+    const chatId = sessionId;
+    const title = turns[0]?.prompt ?? (text || files.map((f) => f.name).join(', '));
+    let turn: Turn = { id, text, prompt: text || files.map((f) => f.name).join(', '), attachments: files, why: [], answer: '', thinking: false, dryRun };
+    // A local copy of the turn follows every update, so the finished turn can be saved.
+    const patchTurn = (patch: Partial<Turn>) => {
+      turn = { ...turn, ...patch };
+      updateTurn(id, () => patch);
+    };
     setTurns((all) => [...all, turn]);
+    setChatInUrl(chatId);
     setSelectedId(id);
     history.current = [...history.current, { role: 'user', content }];
     scrollToBottom();
@@ -211,24 +336,26 @@ export default function App() {
             if (!frame) frame = requestAnimationFrame(flush);
             return;
           }
-          if (e.event === 'decision') updateTurn(id, () => ({ decision: e.data.decision, why: e.data.why }));
-          else if (e.event === 'thinking') updateTurn(id, () => ({ thinking: true }));
+          if (e.event === 'decision') patchTurn({ decision: e.data.decision, why: e.data.why });
+          else if (e.event === 'thinking') patchTurn({ thinking: true });
           else if (e.event === 'done') {
             sources = e.data.sources ?? [];
-            updateTurn(id, () => ({ done: e.data }));
+            patchTurn({ done: e.data });
           } else if (e.event === 'error') {
             const hint = e.data.status === 402 ? '\n\nOpenRouter needs credits for real answers. Turn on "Route only" in the + menu to keep testing routing for free.' : '';
-            updateTurn(id, () => ({ error: e.data.message + hint }));
+            patchTurn({ error: e.data.message + hint });
           }
         },
       );
     } catch (err) {
-      updateTurn(id, () => ({ error: (err as Error).message }));
+      patchTurn({ error: (err as Error).message });
     }
     if (frame) {
       cancelAnimationFrame(frame);
       flush();
     }
+    turn = { ...turn, answer };
+    void saveTurn(chatId, turn, title);
     // Web sources stay in the conversation, so follow-ups know where facts came from.
     const sourcesText = sources.length ? `\n\nSources (web search):\n${sources.map((s) => `- ${s.title}: ${s.url}`).join('\n')}` : '';
     if (answer) {
@@ -245,7 +372,9 @@ export default function App() {
   const feedback = async (t: Turn, success: boolean, note: string) => {
     if (!t.decision) return;
     const ok = await sendFeedback(t.decision.requestId, success, note || undefined);
-    updateTurn(t.id, () => ({ feedback: ok ? (success ? 'Recorded 👍' : 'Recorded 👎') : 'Could not record feedback' }));
+    const feedbackText = ok ? (success ? 'Recorded 👍' : 'Recorded 👎') : 'Could not record feedback';
+    updateTurn(t.id, () => ({ feedback: feedbackText }));
+    if (ok) void saveTurn(sessionId, { ...t, feedback: feedbackText }, turns[0]?.prompt ?? t.prompt);
   };
 
   const activeTools: AiPromptActiveTool[] = [];
@@ -260,7 +389,8 @@ export default function App() {
 
   return (
     <div className="grid h-full grid-rows-[auto_1fr]">
-      <header className="app-header flex items-center gap-2.5 border-b px-5 py-3">
+      <header className="app-header flex items-center gap-2.5 border-b py-2 pr-3 pl-2.5">
+        <PanelToggle side="left" open={sidebarOpen} onClick={() => setSidebarOpen((v) => !v)} />
         <div className="flex size-5.5 items-center justify-center rounded-[7px] bg-linear-to-b from-[#f7f7f7] to-white text-black">
           <RouteIcon className="size-3.5" aria-hidden />
         </div>
@@ -275,10 +405,35 @@ export default function App() {
           <SquarePenIcon className="size-4" aria-hidden />
           New chat
         </button>
+        <PanelToggle side="right" open={inspectorOpen} onClick={() => setInspectorOpen((v) => !v)} />
       </header>
 
-      <div className="grid min-h-0 grid-cols-[minmax(0,1fr)_minmax(360px,500px)] max-lg:grid-cols-1 max-lg:grid-rows-[minmax(0,1fr)_auto]">
-        <section className="grid min-h-0 grid-rows-[1fr_auto]">
+      <div className="flex min-h-0 max-lg:flex-col">
+        <ChatSidebar
+          open={sidebarOpen}
+          chats={chatList}
+          activeId={sessionId}
+          error={chatError}
+          onClose={() => setSidebarOpen(false)}
+          onNew={() => {
+            newChat();
+            if (window.innerWidth < 1024) setSidebarOpen(false);
+          }}
+          onOpen={(id) => {
+            void openChat(id);
+            if (window.innerWidth < 1024) setSidebarOpen(false);
+          }}
+          onRename={async (id, title) => {
+            await chats.rename(id, title).catch((err: Error) => setChatError(`Could not rename: ${err.message}`));
+            void refreshChats();
+          }}
+          onDelete={async (id) => {
+            await chats.remove(id).catch((err: Error) => setChatError(`Could not delete: ${err.message}`));
+            if (id === sessionId) newChat();
+            void refreshChats();
+          }}
+        />
+        <section className="grid min-h-0 min-w-0 flex-1 grid-rows-[1fr_auto]">
           <div ref={scroller} className="min-h-0 overflow-y-auto px-6 pt-7 pb-3 max-lg:px-4">
             <div className="mx-auto flex max-w-190 flex-col gap-5.5">
               {turns.length === 0 ? (
@@ -419,9 +574,23 @@ export default function App() {
           </div>
         </section>
 
-        <aside className="flex min-h-0 flex-col gap-3 overflow-y-auto border-l px-4.5 pt-4.5 pb-7 max-lg:max-h-[45vh] max-lg:border-t max-lg:border-l-0">
-          <Inspector turn={selected} onFeedback={feedback} />
-        </aside>
+        <AnimatePresence initial={false}>
+          {inspectorOpen ? (
+            <motion.aside
+              key="inspector"
+              aria-label="Routing details"
+              initial={{ width: 0, opacity: 0 }}
+              animate={{ width: inspectorWidth, opacity: 1 }}
+              exit={{ width: 0, opacity: 0 }}
+              transition={{ duration: 0.22, ease: [0.2, 0, 0, 1] }}
+              className="min-h-0 shrink-0 overflow-hidden border-l max-lg:max-h-[45vh] max-lg:border-t max-lg:border-l-0"
+            >
+              <div className="flex h-full flex-col gap-3 overflow-y-auto px-4.5 pt-4.5 pb-7" style={{ width: inspectorWidth }}>
+                <Inspector turn={selected} onFeedback={feedback} />
+              </div>
+            </motion.aside>
+          ) : null}
+        </AnimatePresence>
       </div>
 
       <PreferencesDialog
