@@ -1,6 +1,6 @@
-# Model Router
+# System1 Route
 
-[![CI](https://github.com/prestonkakukdev/model-router/actions/workflows/ci.yml/badge.svg)](https://github.com/prestonkakukdev/model-router/actions/workflows/ci.yml)
+[![CI](https://github.com/prestonkakukdev/System1-Route/actions/workflows/ci.yml/badge.svg)](https://github.com/prestonkakukdev/System1-Route/actions/workflows/ci.yml)
 [![License: Apache 2.0](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 
 Routes every request to the best model and reasoning effort for the job, so you get frontier answers when they
