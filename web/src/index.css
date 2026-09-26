@@ -58,6 +58,7 @@
 @theme inline {
   --font-sans: "Geist", -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, sans-serif;
   --font-mono: "Geist Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  --font-display: "Space Grotesk", "Geist", -apple-system, BlinkMacSystemFont, sans-serif;
   --radius-sm: calc(var(--radius) - 4px);
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);

@@ -11,6 +11,7 @@ import {
   TelescopeIcon,
 } from 'lucide-react';
 import * as React from 'react';
+import { ArcBackdrop } from '@/components/arc-backdrop';
 import { AttachmentTile } from '@/components/attachment-tile';
 import { ChatSidebar } from '@/components/chat-sidebar';
 import { Chip } from '@/components/chip';
@@ -40,14 +41,6 @@ const MODES: AiModel[] = [
 ];
 
 const PLACEHOLDERS = ['Ask anything…', 'Prove a theorem…', 'Debug this stack trace…', 'Write a short story…', 'Summarise this contract…', 'What changed in AI this week?'];
-
-const SUGGESTIONS = [
-  "hey! how's it going?",
-  'Prove there are infinitely many primes p ≡ 3 (mod 4).',
-  'Why does my useEffect loop forever?',
-  'Write a 600-word short story about a lighthouse keeper.',
-  'What did Anthropic announce this week?',
-];
 
 const newId = () => crypto.randomUUID();
 
@@ -432,32 +425,28 @@ export default function App() {
             void refreshChats();
           }}
         />
-        <section className="grid min-h-0 min-w-0 flex-1 grid-rows-[1fr_auto]">
-          <div ref={scroller} className="min-h-0 overflow-y-auto px-6 pt-7 pb-3 max-lg:px-4">
-            <div className="mx-auto flex max-w-190 flex-col gap-5.5">
+        <section className="relative grid min-h-0 min-w-0 flex-1 grid-rows-[1fr_auto] overflow-hidden">
+          <AnimatePresence>{turns.length === 0 ? <ArcBackdrop key="arc" /> : null}</AnimatePresence>
+          <div ref={scroller} className="relative min-h-0 overflow-y-auto px-6 pt-7 pb-3 max-lg:px-4">
+            <div className={cn('mx-auto flex max-w-190 flex-col gap-5.5', turns.length === 0 && 'h-full')}>
               {turns.length === 0 ? (
                 <motion.div
-                  initial={{ opacity: 0, y: 6, filter: 'blur(4px)' }}
+                  initial={{ opacity: 0, y: 10, filter: 'blur(6px)' }}
                   animate={{ opacity: 1, y: 0, filter: 'blur(0px)' }}
-                  transition={{ duration: 0.35, ease: [0.2, 0, 0, 1] }}
-                  className="mx-auto mt-[12vh] max-w-130 text-center"
+                  transition={{ duration: 0.6, delay: 0.15, ease: [0.2, 0, 0, 1] }}
+                  className="m-auto flex max-w-140 flex-col items-center pt-[22vh] text-center max-lg:pt-[12vh]"
                 >
-                  <h2 className="mb-2 text-[22px] font-semibold tracking-tight">What should the router handle?</h2>
-                  <p className="text-muted-foreground">
-                    Each request goes to the model and effort that fit it best. Use Inspect under an answer to see Jev's reading of the request and why that model won.
-                  </p>
-                  <div className="mt-5.5 flex flex-wrap justify-center gap-2">
-                    {SUGGESTIONS.map((s) => (
-                      <button
-                        key={s}
-                        type="button"
-                        onClick={() => void send(s)}
-                        className="bg-muted text-muted-foreground hover:text-foreground cursor-pointer rounded-full px-3 py-1.5 text-[13px] shadow-[inset_0_0_0_1px_rgba(123,123,123,0.12)] transition-[color,transform] duration-150 hover:-translate-y-px"
-                      >
-                        {s}
-                      </button>
-                    ))}
+                  <div className="text-muted-foreground mb-4 flex items-center gap-2 font-mono text-[11px] tracking-[0.18em] uppercase">
+                    <span className="size-1.5 rounded-full bg-[#7b6cff] shadow-[0_0_10px_2px_rgba(123,108,255,0.7)]" />
+                    Powered by Jev
                   </div>
+                  <h2 className="font-display text-[34px] leading-[1.12] font-medium tracking-[-0.02em] text-balance max-sm:text-[27px]">
+                    The routing architecture defined by speed and efficiency.
+                  </h2>
+                  <p className="text-muted-foreground mt-4 max-w-110 text-[14.5px] leading-relaxed text-balance">
+                    Every request is read by Jev and sent to the model and reasoning effort that fit it: frontier answers when
+                    they matter, fast and cheap ones when they don't.
+                  </p>
                 </motion.div>
               ) : (
                 turns.map((t) => (
@@ -477,7 +466,7 @@ export default function App() {
             </div>
           </div>
 
-          <div className="mx-auto w-full max-w-200 px-6 pt-2 pb-5.5 max-lg:px-4 max-lg:pb-4">
+          <div className="relative mx-auto w-full max-w-200 px-6 pt-2 pb-5.5 max-lg:px-4 max-lg:pb-4">
             <input
               ref={fileInput}
               type="file"
