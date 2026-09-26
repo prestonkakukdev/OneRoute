@@ -3,8 +3,8 @@
   "configurations": [
     {
       "name": "router-ui",
-      "runtimeExecutable": "npx",
-      "runtimeArgs": ["tsx", "src/cli/index.ts", "serve", "--port", "8787"],
+      "runtimeExecutable": "sh",
+      "runtimeArgs": ["-c", "npm run web:build --silent >/dev/null && npx tsx src/cli/index.ts serve --port 8787"],
       "port": 8787
     }
   ]

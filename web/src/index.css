@@ -1,0 +1,155 @@
+@import "tailwindcss";
+@import "katex/dist/katex.min.css";
+@import "highlight.js/styles/github-dark.min.css";
+
+@custom-variant dark (&:is(.dark *));
+
+/* shadcn neutral tokens. The app runs in dark mode (class="dark" on <html>). */
+:root {
+  --radius: 0.75rem;
+  --background: oklch(1 0 0);
+  --foreground: oklch(0.145 0 0);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.145 0 0);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.145 0 0);
+  --primary: oklch(0.205 0 0);
+  --primary-foreground: oklch(0.985 0 0);
+  --secondary: oklch(0.97 0 0);
+  --secondary-foreground: oklch(0.205 0 0);
+  --muted: oklch(0.97 0 0);
+  --muted-foreground: oklch(0.556 0 0);
+  --accent: oklch(0.97 0 0);
+  --accent-foreground: oklch(0.205 0 0);
+  --destructive: oklch(0.577 0.245 27.325);
+  --border: oklch(0.922 0 0);
+  --input: oklch(0.922 0 0);
+  --ring: oklch(0.708 0 0);
+  --good: #16a34a;
+  --bad: #dc2626;
+  --warn: #d97706;
+}
+
+.dark {
+  --background: #0a0a0a;
+  --foreground: #fafafa;
+  --card: #171717;
+  --card-foreground: #fafafa;
+  --popover: #171717;
+  --popover-foreground: #fafafa;
+  --primary: #fafafa;
+  --primary-foreground: #0a0a0a;
+  --secondary: #262626;
+  --secondary-foreground: #fafafa;
+  --muted: #262626;
+  --muted-foreground: #a1a1a1;
+  --accent: #262626;
+  --accent-foreground: #fafafa;
+  --destructive: #f87171;
+  --border: rgb(255 255 255 / 0.1);
+  --input: rgb(255 255 255 / 0.15);
+  --ring: #737373;
+  --good: #4ade80;
+  --bad: #f87171;
+  --warn: #fbbf24;
+  color-scheme: dark;
+}
+
+@theme inline {
+  --font-sans: "Geist", -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, sans-serif;
+  --font-mono: "Geist Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-good: var(--good);
+  --color-bad: var(--bad);
+  --color-warn: var(--warn);
+  --animate-shimmer: shimmer 1.6s linear infinite;
+  @keyframes shimmer {
+    from { background-position: 200% 0; }
+    to { background-position: -200% 0; }
+  }
+}
+
+@layer base {
+  * { @apply border-border; }
+  html, body, #root { height: 100%; }
+  body {
+    @apply bg-background text-foreground font-sans antialiased;
+    font-size: 14px;
+    line-height: 1.55;
+  }
+  /* Standalone (Dock) window: let the header act as the title bar. */
+  @media (display-mode: standalone) {
+    .app-header { -webkit-app-region: drag; }
+    .app-header button { -webkit-app-region: no-drag; }
+  }
+}
+
+@utility shimmer-text {
+  background: linear-gradient(90deg, var(--muted-foreground) 0%, var(--foreground) 50%, var(--muted-foreground) 100%);
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: var(--animate-shimmer);
+}
+
+/* Model answers rendered from Markdown */
+@layer components {
+  .prose-answer { word-wrap: break-word; font-size: 15px; line-height: 1.7; }
+  .prose-answer > :first-child { margin-top: 0; }
+  .prose-answer > :last-child { margin-bottom: 0; }
+  .prose-answer p { margin: 0 0 12px; }
+  .prose-answer h1, .prose-answer h2, .prose-answer h3, .prose-answer h4, .prose-answer h5, .prose-answer h6 {
+    color: var(--foreground); font-weight: 600; letter-spacing: -0.01em; line-height: 1.35; margin: 22px 0 8px;
+  }
+  .prose-answer h1 { font-size: 22px; }
+  .prose-answer h2 { font-size: 19px; }
+  .prose-answer h3 { font-size: 16.5px; }
+  .prose-answer h4, .prose-answer h5, .prose-answer h6 { font-size: 15px; color: var(--muted-foreground); }
+  .prose-answer ul, .prose-answer ol { margin: 0 0 12px; padding-left: 24px; }
+  .prose-answer ul { list-style: disc; }
+  .prose-answer ol { list-style: decimal; }
+  .prose-answer li { margin: 3px 0; }
+  .prose-answer li > p { margin: 0 0 6px; }
+  .prose-answer li > ul, .prose-answer li > ol { margin: 4px 0 0; }
+  .prose-answer li::marker { color: var(--muted-foreground); }
+  .prose-answer blockquote { margin: 0 0 12px; padding: 2px 14px; border-left: 3px solid var(--border); color: var(--muted-foreground); }
+  .prose-answer hr { border: 0; border-top: 1px solid var(--border); margin: 20px 0; }
+  .prose-answer a { text-decoration: underline; text-decoration-color: color-mix(in oklab, var(--muted-foreground) 70%, transparent); text-underline-offset: 2px; }
+  .prose-answer a:hover { text-decoration-color: var(--foreground); }
+  .prose-answer strong { font-weight: 600; color: var(--foreground); }
+  .prose-answer em { font-style: italic; }
+  .prose-answer table { border-collapse: collapse; margin: 0 0 12px; font-size: 14px; display: block; overflow-x: auto; max-width: 100%; }
+  .prose-answer th, .prose-answer td { border: 1px solid var(--border); padding: 6px 10px; text-align: left; vertical-align: top; }
+  .prose-answer th { background: var(--muted); font-weight: 600; }
+  .prose-answer img { max-width: 100%; border-radius: 10px; }
+  .prose-answer input[type="checkbox"] { margin-right: 6px; }
+  .prose-answer pre { background: var(--popover); border: 1px solid var(--border); padding: 12px 14px; border-radius: 12px; overflow-x: auto; white-space: pre; line-height: 1.55; margin: 12px 0; }
+  .prose-answer code { font-family: var(--font-mono); font-size: 13px; }
+  .prose-answer :not(pre) > code { background: var(--muted); padding: 1px 5px; border-radius: 6px; }
+  .prose-answer pre code.hljs { background: transparent; padding: 0; }
+  .prose-answer .katex { font-size: 1.05em; }
+  .prose-answer .katex-display { margin: 12px 0; overflow-x: auto; overflow-y: hidden; padding: 2px 0; }
+  .prose-answer .plain { white-space: pre-wrap; }
+}

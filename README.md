@@ -35,11 +35,21 @@ mrouter profiles    # optional: LLM-written model profiles (needs OpenRouter cre
 
 Without `npm link`, use `npm run dev -- <command>` or `node dist/cli/index.js <command>`.
 
-## Testing interface
+## The app
 
 ```bash
-mrouter ui        # opens http://127.0.0.1:8787/ in your browser
+npm run web:build   # builds the interface (web/ -> web/dist); the router serves it
+mrouter ui          # starts the router and opens http://127.0.0.1:8787/
 ```
+
+**Put it in the Dock:** open http://localhost:8787 in Safari and choose File → Add to Dock (or in Chrome: ⋮ →
+Cast, save and share → Install page as app). It opens in its own window with its own icon; the router must be running.
+
+The interface is React + TypeScript + Tailwind v4 in `web/`, laid out the shadcn way (`web/src/components/ui`,
+`@/` alias, `web/components.json`). The composer is the Motoko `AiPromptInput` component
+(`web/src/components/ui/ai-prompt-input.tsx`); the routing modes use its model selector. The router reads the built
+files on every request, so after `npm run web:build` a refresh shows the change without restarting. For live reload
+while editing the interface, run `npm run web:dev` next to a running router and open http://localhost:5173.
 
 Chat on the left. Click any answer to inspect it on the right: Jev's reading (task type, difficulty,
 reasoning depth, answer length, signals, capability importance), the capability weights the router looked for,

@@ -3,7 +3,9 @@ import { conversationId } from '../cache.js';
 import { Hono, type Context } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
 import { streamSSE } from 'hono/streaming';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
+import { extname, normalize, sep } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { z } from 'zod';
 import { config } from '../config.js';
 import type { Store } from '../db/store.js';
@@ -56,6 +58,20 @@ const feedbackSchema = z.object({
 const AUTO_MODELS = ['auto', ...MODES.map((m) => `auto:${m}`)];
 // Large enough for long documents and several images, small enough to protect the process.
 const MAX_BODY_BYTES = 32 * 1024 * 1024;
+const WEB_DIST = fileURLToPath(new URL('../../web/dist/', import.meta.url));
+export const appBuilt = () => existsSync(`${WEB_DIST}index.html`);
+const MIME: Record<string, string> = {
+  '.js': 'text/javascript; charset=utf-8',
+  '.css': 'text/css; charset=utf-8',
+  '.png': 'image/png',
+  '.svg': 'image/svg+xml',
+  '.ico': 'image/x-icon',
+  '.woff2': 'font/woff2',
+  '.woff': 'font/woff',
+  '.ttf': 'font/ttf',
+  '.webmanifest': 'application/manifest+json',
+  '.json': 'application/json',
+};
 
 // "auto", "auto:cheap", "router/auto:best" -> routed; anything else is a direct model id.
 export function parseAutoModel(model: string | undefined): { auto: boolean; mode?: Mode } {
@@ -181,8 +197,23 @@ export function createApp(store: Store, router: Router, executor = new Executor(
     return c.json({ object: 'list', data });
   });
 
-  // --- Testing interface -------------------------------------------------------------------------
-  app.get('/', (c) => c.html(readFileSync(new URL('../../ui/index.html', import.meta.url), 'utf8')));
+  // --- App (web/, built to web/dist) ----------------------------------------------------------------
+  // Files are read on every request, so `npm run web:build` shows up on refresh without a restart.
+  app.get('/', (c) => {
+    const index = `${WEB_DIST}index.html`;
+    if (!existsSync(index)) return c.html(`<p style="font:14px system-ui;padding:24px">The app is not built yet. Run <code>npm run web:build</code>, then reload.</p>`, 503);
+    c.header('cache-control', 'no-cache');
+    return c.html(readFileSync(index, 'utf8'));
+  });
+  app.get('/:file{(assets|icons)/.+|manifest\\.webmanifest|favicon\\.ico}', (c) => {
+    const rel = normalize(c.req.param('file'));
+    const path = `${WEB_DIST}${rel}`;
+    if (rel.startsWith('..') || rel.includes(`..${sep}`) || !existsSync(path)) return c.notFound();
+    // Built assets have content hashes in their names, so they never change.
+    c.header('cache-control', rel.startsWith('assets/') ? 'public, max-age=31536000, immutable' : 'no-cache');
+    c.header('content-type', MIME[extname(path)] ?? 'application/octet-stream');
+    return c.body(readFileSync(path));
+  });
 
   app.get('/ui/api/models', (c) =>
     c.json(

@@ -22,7 +22,7 @@ import { generateProfiles } from '../ingest/profiles.js';
 import { loadCases, runBench, summarize, writeRows } from '../bench.js';
 import { fetchModels } from '../providers/openrouter.js';
 import { Executor } from '../gateway/execute.js';
-import { createApp } from '../gateway/server.js';
+import { appBuilt, createApp } from '../gateway/server.js';
 import { readSse } from '../gateway/sse.js';
 import { explainDecision, summaryLine } from '../router/explain.js';
 import { RoutingError } from '../router/optimizer.js';
@@ -64,6 +64,10 @@ function parseNumber(value: string): number {
   const n = Number(value);
   if (!Number.isFinite(n)) throw new InvalidArgumentError('must be a number');
   return n;
+}
+
+function warnAppNotBuilt(): void {
+  if (!appBuilt()) console.log(red('The app is not built yet: run `npm run web:build` (the API works without it).'));
 }
 
 function warnMissingKeys(): void {
@@ -237,6 +241,7 @@ program
   .option('--host <host>', 'interface to bind', '127.0.0.1')
   .action((opts: { port: number; host: string }) => {
     warnMissingKeys();
+    warnAppNotBuilt();
     const store = new Store(config.dbPath);
     const app = createApp(store, new Router(store));
     serve({ fetch: app.fetch, port: opts.port, hostname: opts.host }, (info) => {
@@ -254,6 +259,7 @@ program
   .option('-p, --port <port>', 'port', parseNumber, config.port)
   .action((opts: { port: number }) => {
     warnMissingKeys();
+    warnAppNotBuilt();
     const store = new Store(config.dbPath);
     const app = createApp(store, new Router(store));
     serve({ fetch: app.fetch, port: opts.port, hostname: '127.0.0.1' }, (info) => {
