@@ -23,6 +23,7 @@ import { loadCases, runBench, summarize, writeRows } from '../bench.js';
 import { fetchModels } from '../providers/openrouter.js';
 import { Executor } from '../gateway/execute.js';
 import { appBuilt, createApp } from '../gateway/server.js';
+import { CATALOG_FILE, importCatalog, readCatalog, writeCatalog } from '../db/catalog.js';
 import { installService, printStatus, restartService, showLogs, startService, stopService, uninstallService } from './service.js';
 import { readSse } from '../gateway/sse.js';
 import { explainDecision, summaryLine } from '../router/explain.js';
@@ -524,6 +525,28 @@ program
       }
     }
     process.exitCode = failed ? 1 : 0;
+  });
+
+const catalogCmd = program.command('catalog').description('The shipped model catalog (data/catalog.json): capability scores, speed, pricing');
+catalogCmd
+  .command('export')
+  .description('Write the local model database to data/catalog.json (after `mrouter ingest`, to share it)')
+  .action(() => {
+    const store = new Store(config.dbPath);
+    const c = writeCatalog(store.db);
+    const count = (t: string) => c.tables[t]?.rows.length ?? 0;
+    console.log(`wrote ${CATALOG_FILE}: ${count('models')} models, ${count('skills')} capability scores, ${count('variant_metrics')} speed rows, ${count('profiles')} profiles`);
+    store.close();
+  });
+catalogCmd
+  .command('import')
+  .description('Load data/catalog.json into the local database now (keeps your enabled/disabled choices)')
+  .action(() => {
+    const store = new Store(config.dbPath);
+    const c = readCatalog();
+    if (!c) throw new Error(`No catalog at ${CATALOG_FILE}`);
+    console.log(`loaded ${importCatalog(store.db, c).models} models from the catalog exported ${c.exportedAt}`);
+    store.close();
   });
 
 const service = program

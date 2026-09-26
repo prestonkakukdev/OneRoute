@@ -1,0 +1,30 @@
+name: Bug report
+description: Something doesn't work as expected
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What you did, what you expected, and what happened instead.
+    validations:
+      required: true
+  - type: textarea
+    id: decision
+    attributes:
+      label: Routing decision (if it's about a model choice)
+      description: From the app's inspector ("Raw decision JSON") or `mrouter route --json "..."`. Remove anything private.
+      render: json
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: Output of `git rev-parse --short HEAD`, and your Node version (`node -v`) and OS.
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: Relevant terminal output or `npm run service -- logs`. Never paste API keys.
+      render: text

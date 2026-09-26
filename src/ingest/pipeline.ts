@@ -257,6 +257,9 @@ export function runPipeline(store: Store, input: PipelineInput): PipelineReport 
     store.replaceAllBenchmarks(orId, rows.filter((x) => x.orId === orId));
   }
 
+  // A local ingest is newer than any shipped catalog exported before it (see src/db/catalog.ts).
+  store.setMeta('ingested_at', new Date().toISOString());
+
   // Models with no independent anchor are switched off rather than routed on guesses.
   const disabled: string[] = [];
   for (const m of store.listModels()) {

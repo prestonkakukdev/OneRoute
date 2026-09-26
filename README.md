@@ -1,12 +1,18 @@
 # Model Router
 
-Routes every request to the best model and reasoning effort for the job.
-**Jev** (TypeSafe's System One model) reads the request and answers 18 quick questions about it.
-**Plain code** combines those answers with the capability database and picks the model × effort with the best
-`P(success) × value − cost − latency penalty`.
+[![CI](https://github.com/prestonkakukdev/model-router/actions/workflows/ci.yml/badge.svg)](https://github.com/prestonkakukdev/model-router/actions/workflows/ci.yml)
+[![License: Apache 2.0](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
+
+Routes every request to the best model and reasoning effort for the job, so you get frontier answers when they
+matter and fast, cheap ones when they don't.
+
+**Jev** (TypeSafe's System One model) reads each request and answers ~20 quick questions about it: task type,
+difficulty, how much reasoning it needs, whether it needs the web, which capabilities matter. **Plain code** then
+scores every model × effort against a capability database built from independent benchmarks and picks the best
+`P(success) × value − cost − waiting`. Every decision is explained.
 
 ```
-request ─► Jev (one call, ~0.3-1s): task type, difficulty, reasoning depth, output length, needs web,
+request ─► Jev (one call, ~0.5s): task type, difficulty, reasoning depth, output length, needs web,
            latency-sensitive, high stakes, + importance (0-1) of 11 capabilities
         ─► requirement profile: weights over 16 capabilities (task-type mix + Jev importances + hard facts)
         ─► hard filters (context, images, tools, JSON schema, allow/deny, cost/latency caps)
@@ -15,31 +21,63 @@ request ─► Jev (one call, ~0.3-1s): task type, difficulty, reasoning depth, 
         ─► call the model through OpenRouter (fallbacks, caching) ─► log cost, latency, feedback ─► learn
 ```
 
-## Setup
+**What you get**
+- A chat app (web, installable in the macOS Dock) that shows, for every answer, which model and effort were picked and why
+- An OpenAI-compatible API (`model: "auto"`), so existing tools and SDKs can use the router unchanged
+- A CLI for chatting, inspecting decisions and managing the model database
+- ~110 current models with per-effort capability scores, speed and pricing, shipped in `data/catalog.json`
+- Learning from use: estimates self-correct from real answers; "that's wrong" in your next message counts as feedback
 
-Requires Node 22.13+.
+## Quick start
+
+You need **Node.js 22.13 or newer**, an **[OpenRouter](https://openrouter.ai/keys) API key with some credits** (it runs
+the models) and a **Jev / [TypeSafe](https://typesafe.ai) API key** (it reads the requests).
 
 ```bash
+git clone https://github.com/prestonkakukdev/model-router.git
+cd model-router
 npm install
-npm run build
-npm link            # optional: puts `mrouter` on your PATH
+npm run setup      # asks for your two keys, builds everything and checks the keys work
+npm start          # then open http://localhost:8787
 ```
 
-Put your keys in `.env` (`OPENROUTER_API_KEY`, `TYPESAFE_API_KEY`, `ARTIFICIAL_ANALYSIS_API_KEY`), then:
+`npm run setup` writes your keys to `.env` (git-ignored). You can also copy `.env.example` to `.env` and fill it in
+by hand; the optional settings are documented there.
+
+**Keep it running (macOS).** Instead of `npm start`:
 
 ```bash
-mrouter check       # verifies the keys and times a Jev call
-mrouter ingest      # builds the capability database (needs ARTIFICIAL_ANALYSIS_API_KEY)
-mrouter profiles    # optional: LLM-written model profiles (needs OpenRouter credits, ~$1-2)
+npm run service -- install   # background service: starts at login, restarts itself after crashes and updates
 ```
 
-Without `npm link`, use `npm run dev -- <command>` or `node dist/cli/index.js <command>`.
+Then open http://localhost:8787 in Safari and choose **File → Add to Dock** (Chrome: ⋮ → Cast, save and share →
+Install page as app) to get it as its own app. On Linux or Windows, run `npm start` under your usual process manager.
+
+**Use it from code.** Point any OpenAI-compatible client at `http://localhost:8787/v1` with model `auto` (see [API](#api)).
+
+**Put `mrouter` on your PATH** (optional): `npm link`. Otherwise use `npm run dev -- <command>`.
+
+### Updating
+
+```bash
+git pull && npm install && npm run build
+```
+
+A newer model catalog in `data/catalog.json` is loaded automatically on the next start (models you disabled stay
+disabled). With the background service, code changes go live by themselves; run `npm run service -- restart` after
+`npm install`.
+
+### What stays on your machine
+
+Everything is local: your keys (`.env`), your chats, attachments, routing log, feedback and the corrections the router
+learns from your usage all live in `router.db` next to the code. Nothing is sent anywhere except the requests
+themselves: to Jev (a compact summary of the conversation, to classify it) and to OpenRouter (the conversation, to the
+chosen model). Set `ROUTER_STORE_PROMPTS=false` to keep prompt text out of the routing log.
 
 ## The app
 
 ```bash
-npm run web:build   # builds the interface (web/ -> web/dist); the router serves it
-mrouter ui          # starts the router and opens http://127.0.0.1:8787/
+mrouter ui          # starts the router and opens http://127.0.0.1:8787/ (skip if the service is running)
 ```
 
 **Keep it running (macOS):**
@@ -135,7 +173,9 @@ and scores them slightly lower. Prompt size is estimated from the actual image d
 | `src/db/` | SQLite capability DB: models, skills per model × task type (× effort once measured), decisions, outcomes, sessions. |
 | `src/router/` | The estimator (success, tokens, cost, latency), the optimizer, escalation, and the explanations. |
 | `src/gateway/` | Executes against OpenRouter with fallbacks, passes streams through, and records usage. Also the HTTP server. |
-| `data/` | Seed priors (`seed.json`) and an OpenRouter metadata snapshot, so it works before the first `sync`. |
+| `web/` | The app: React + TypeScript + Tailwind v4 (shadcn layout), built to `web/dist` and served by the router. |
+| `scripts/` | `setup.mjs` (first-time setup) and `service.mjs` (the background-service supervisor). |
+| `data/` | `catalog.json` (the shipped model database), vendor benchmark reports, name mappings, and bootstrap priors. |
 
 ## Preferences
 
@@ -146,12 +186,12 @@ Modes (`cheap` / `balanced` / `best`) set the baseline; preferences steer the op
 | `quality_weight` (default 1) | How much answer quality counts. >1 = pay more for a better answer ("sacrifice cost for intelligence") |
 | `cost_weight` (default 1) | How much saving money counts. <1 = cost matters less (stronger, pricier models are fine); >1 = more cost-conscious |
 | `speed_weight` (default 1) | How much waiting counts. >1 = prefer faster models and lower effort |
-
-Weights multiply how much each factor counts in the score: 0.5 = half as much, 2 = twice as much. The testing UI shows
-them as plain choices (Doesn't matter much / Matters less / Normal / Matters more / Matters a lot).
 | `open_weights` | `any`, `prefer` (closed models must clearly win), `only` (closed models excluded) |
 | `prefer_providers`, `avoid_providers` | Soft preference, e.g. `["anthropic","google"]` |
 | `min_quality` (0-100) | Never pick a model whose skill for the request is below this |
+
+Weights multiply how much each factor counts in the score: 0.5 = half as much, 2 = twice as much. The app shows
+them as plain choices (Doesn't matter much / Matters less / Normal / Matters more / Matters a lot).
 
 ```bash
 mrouter chat --pref quality=3 --pref open=prefer --pref avoid=x-ai
@@ -168,8 +208,12 @@ once a model has a real traffic record on OpenRouter.
 
 ## The capability database (steps 1-3)
 
+The repo ships the database as `data/catalog.json`, so you don't need to build it. To rebuild it from the sources
+yourself (needs a free [Artificial Analysis](https://artificialanalysis.ai) API key in `ARTIFICIAL_ANALYSIS_API_KEY`):
+
 ```bash
 mrouter ingest               # steps 1-2: rebuild from all sources (~20s); --cache reuses downloads
+mrouter catalog export       # write the result to data/catalog.json (to share it, e.g. in a pull request)
 mrouter profiles             # step 3: a strong LLM writes each model's profile (only changed models)
 mrouter models list --sort computer_use
 mrouter models show anthropic/claude-opus-5.5   # every capability at every effort, with trust and sources
@@ -213,8 +257,24 @@ mrouter bench bench/sample.txt           # route a prompt set in every mode; no 
 mrouter route --json "..."               # full decision, including Jev's raw answers and all candidates
 ```
 
-## Tests
+## Development
 
 ```bash
-npm test
+npm test               # unit tests (offline; no keys needed)
+npm run typecheck      # router and app
+npm run web:dev        # live-reloading app on http://localhost:5173 (next to a running router)
 ```
+
+See [CONTRIBUTING.md](CONTRIBUTING.md). Security issues: [SECURITY.md](SECURITY.md).
+
+## Data sources and attribution
+
+Capability scores are derived from [Artificial Analysis](https://artificialanalysis.ai) (benchmarks and speed per
+reasoning effort), [LMArena](https://lmarena.ai) (human-preference ratings), vendor model cards and release pages, and
+[OpenRouter](https://openrouter.ai) (pricing, context, modalities and live provider stats). The catalog contains the
+router's derived scores, not the sources' raw datasets. Model routing and classification use
+[TypeSafe's Jev](https://typesafe.ai).
+
+## License
+
+[Apache License 2.0](LICENSE). Copyright 2026 prestonkakukdev.

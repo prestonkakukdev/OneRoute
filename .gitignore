@@ -1,7 +1,20 @@
+# dependencies and builds
 node_modules/
 dist/
+
+# secrets and local data (keys, chats, routing log)
 .env
+.env.*
+!.env.example
 *.db
 *.db-*
+
+# downloaded source data and local results
 data/cache/
 bench/results/
+
+# OS / editor
+.DS_Store
+*.log
+.vscode/
+.idea/

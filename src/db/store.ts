@@ -3,6 +3,7 @@ import { config } from '../config.js';
 import type { Dimension, Effort } from '../taxonomy.js';
 import type { ProviderStats } from '../ingest/providerStats.js';
 import type { ModelRecord, RouteDecision, SkillValue, VariantMetrics } from '../types.js';
+import { catalogIsNewer, getMeta, importCatalog, readCatalog, setMeta } from './catalog.js';
 import { buildSeedModels } from './seed.js';
 
 const SCHEMA = `
@@ -146,6 +147,10 @@ CREATE TABLE IF NOT EXISTS chat_turns (
   PRIMARY KEY (chat_id, turn_id)
 );
 CREATE INDEX IF NOT EXISTS chats_updated ON chats(updated_at);
+CREATE TABLE IF NOT EXISTS meta (
+  key TEXT PRIMARY KEY,
+  value TEXT NOT NULL
+);
 `;
 
 type Row = Record<string, unknown>;
@@ -201,7 +206,9 @@ export class Store {
   private catalogCache: { version: number; all: ModelRecord[] } | undefined;
   private statsCache: { version: number; stats: Map<string, SuccessStat> } | undefined;
 
-  constructor(path: string) {
+  // The shipped model catalog (data/catalog.json) is loaded into a new database and whenever a newer one
+  // arrives (git pull). In-memory stores (tests) use the small built-in seed unless asked otherwise.
+  constructor(path: string, opts: { catalog?: boolean } = {}) {
     this.db = new DatabaseSync(path);
     this.db.exec('PRAGMA journal_mode = WAL;');
     this.db.exec(SCHEMA);
@@ -219,7 +226,17 @@ export class Store {
     const modelCols = (this.db.prepare('PRAGMA table_info(models)').all() as Row[]).map((c) => c.name);
     if (!modelCols.includes('open_weights')) this.db.exec('ALTER TABLE models ADD COLUMN open_weights INTEGER NOT NULL DEFAULT 0');
     const { n } = this.db.prepare('SELECT COUNT(*) AS n FROM models').get() as { n: number };
-    if (n === 0) this.seed(buildSeedModels());
+    const catalog = (opts.catalog ?? path !== ':memory:') ? readCatalog() : undefined;
+    if (catalog && (n === 0 || catalogIsNewer(this.db, catalog))) importCatalog(this.db, catalog);
+    else if (n === 0) this.seed(buildSeedModels());
+  }
+
+  getMeta(key: string): string | undefined {
+    return getMeta(this.db, key);
+  }
+
+  setMeta(key: string, value: string): void {
+    setMeta(this.db, key, value);
   }
 
   seed(models: ModelRecord[]): void {
