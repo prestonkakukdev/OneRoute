@@ -36,7 +36,8 @@
   --font-sans: "Geist", -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, sans-serif;
   --font-mono: "Geist Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
   --font-display: "Space Grotesk", "Geist", -apple-system, BlinkMacSystemFont, sans-serif;
-  --font-wordmark: "Plus Jakarta Sans", "Geist", -apple-system, BlinkMacSystemFont, sans-serif;
+  /* The OneRoute name: the same face and weight as the hero. */
+  --font-wordmark: "Space Grotesk", "Geist", -apple-system, BlinkMacSystemFont, sans-serif;
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --color-card: var(--card);

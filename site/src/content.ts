@@ -9,7 +9,7 @@ export const NAV = [
   { label: 'Pricing', href: '#pricing' },
   { label: 'API', href: '#api' },
   { label: 'About', href: '#about' },
-  { label: 'License', href: '#license' },
+  { label: 'License', href: LICENSE_URL, external: true },
 ];
 
 // `estimate: true` marks targets that aren't measured yet (shown with an asterisk and a footnote).
@@ -23,26 +23,10 @@ export const STATS = [
 export const STATS_FOOTNOTE = 'Targets from early internal testing. Published benchmarks are on the way.';
 
 export const STEPS = [
-  {
-    n: '01',
-    title: 'Read',
-    body: 'Jev, a fast classifier, answers about twenty questions about the request in one call: task type, difficulty, how much reasoning it needs, how long the answer should be, whether it needs the web, and how much each of 11 capabilities matters.',
-  },
-  {
-    n: '02',
-    title: 'Score',
-    body: 'Every model is scored at every reasoning effort against a capability database built from independent benchmarks: 16 capabilities, from debugging code to recalling details in long documents.',
-  },
-  {
-    n: '03',
-    title: 'Decide',
-    body: 'A deterministic optimizer picks the best expected value. Same request, same choice, and every decision comes with the reasons: the model, the effort, the estimated cost and why it won.',
-  },
-  {
-    n: '04',
-    title: 'Learn',
-    body: 'Cost and speed estimates correct themselves from real answers, and a follow-up like “that’s wrong” counts as feedback. It gets sharper the more it is used.',
-  },
+  { n: '01', title: 'Read', body: 'Jev answers twenty questions about the request in one fast call.' },
+  { n: '02', title: 'Score', body: 'Every model, at every reasoning effort, on 16 benchmarked capabilities.' },
+  { n: '03', title: 'Decide', body: 'Plain code picks the best trade-off, and says why.' },
+  { n: '04', title: 'Learn', body: 'Real answers and your feedback sharpen every estimate.' },
 ];
 
 export const COMPARISON = {
@@ -87,9 +71,9 @@ res = client.chat.completions.create(
 };
 
 export const API_POINTS = [
-  { title: 'OpenAI-compatible', body: 'Change the base URL and set the model to auto. Streaming, tools, images and PDFs work as before.' },
-  { title: 'Three modes', body: 'auto:cheap, auto:balanced and auto:best set the trade-off; preferences fine-tune it per request.' },
-  { title: 'Every decision on record', body: 'Each response carries the chosen model, effort, estimated and actual cost, and why it won.' },
+  { title: 'OpenAI-compatible', body: 'Change the base URL, set the model to auto. Streaming, tools and files work as before.' },
+  { title: 'Three modes', body: 'auto:cheap, auto:balanced and auto:best set the trade-off for each request.' },
+  { title: 'Every decision on record', body: 'Each response carries the model, the effort, the cost and why it won.' },
 ];
 
 export const PLANS = [

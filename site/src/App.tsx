@@ -1,4 +1,4 @@
-import { About, Footer, License } from './sections/about';
+import { About, Footer } from './sections/about';
 import { Api } from './sections/api';
 import { Architecture, Comparison } from './sections/architecture';
 import { Hero } from './sections/hero';
@@ -18,7 +18,6 @@ export default function App() {
         <Api />
         <Pricing />
         <About />
-        <License />
       </main>
       <Footer />
     </>

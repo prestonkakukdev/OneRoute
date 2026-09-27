@@ -1,33 +1,26 @@
 import { CheckIcon, MinusIcon } from 'lucide-react';
-import { Reveal, SectionHeading } from '@/components/reveal';
+import { Reveal, SectionTitle } from '@/components/reveal';
 import { COMPARISON, STEPS } from '@/content';
 import { cn } from '@/lib/utils';
+import { BAND_CELL, Band } from './stats';
 
 export function Architecture() {
   return (
-    <section id="architecture" className="mx-auto max-w-6xl px-6 pb-32">
-      <SectionHeading eyebrow="The architecture" title="A classifier reads the request. Plain code makes the call.">
-        No model guessing which model to use. OneRoute separates understanding a request from deciding where it goes, so every
-        choice is fast, repeatable and explained.
-      </SectionHeading>
-
-      <div className="grid grid-cols-4 gap-4 max-lg:grid-cols-2 max-sm:grid-cols-1">
+    <section id="architecture" className="pb-32">
+      <SectionTitle>A classifier reads. Plain code decides.</SectionTitle>
+      <Band>
         {STEPS.map((s, i) => (
-          <Reveal key={s.n} delay={i * 0.08} className="group bg-card relative rounded-2xl border p-6 transition-colors duration-300 hover:border-white/15">
+          <Reveal key={s.n} delay={i * 0.08} className={cn(BAND_CELL, 'gap-3')}>
             <div className="text-arc font-mono text-[12px]">{s.n}</div>
-            <h3 className="font-display mt-3 text-[20px] font-medium tracking-[-0.01em]">{s.title}</h3>
-            <p className="text-muted-foreground mt-2 text-[14px] leading-relaxed">{s.body}</p>
+            <h3 className="font-display text-[26px] leading-none font-medium tracking-[-0.02em]">{s.title}</h3>
+            <p className="text-muted-foreground max-w-[17rem] text-[14.5px] leading-snug">{s.body}</p>
           </Reveal>
         ))}
-      </div>
-
-      <Reveal delay={0.1} className="mt-4">
-        <div className="bg-card flex flex-wrap items-center justify-between gap-4 rounded-2xl border px-6 py-5">
-          <span className="text-muted-foreground text-[14px]">For every model at every reasoning effort:</span>
-          <code className="font-mono text-[15px] tracking-tight max-sm:text-[13px]">
-            score = <span className="text-arc">P(success)</span> × value − cost − wait
-          </code>
-        </div>
+      </Band>
+      <Reveal delay={0.1} className="mt-14 px-6 text-center">
+        <code className="font-mono text-[22px] tracking-tight max-md:text-[17px] max-sm:text-[14px]">
+          score = <span className="text-arc">P(success)</span> × value − cost − wait
+        </code>
       </Reveal>
     </section>
   );
@@ -47,10 +40,8 @@ function Cell({ value, highlight }: { value: boolean | string | null; highlight?
 
 export function Comparison() {
   return (
-    <section id="why" className="mx-auto max-w-5xl px-6 pb-32">
-      <SectionHeading eyebrow="Why it wins" title="Built to decide, not to guess.">
-        {COMPARISON.note}
-      </SectionHeading>
+    <section id="why" className="mx-auto max-w-6xl px-6 pb-32">
+      <SectionTitle>Built to decide, not to guess.</SectionTitle>
       <Reveal>
         <div className="overflow-x-auto rounded-2xl border">
           <table className="w-full min-w-[640px] border-collapse text-left text-[14px]">
@@ -59,7 +50,7 @@ export function Comparison() {
                 <th className="px-6 py-4 font-normal" />
                 {COMPARISON.columns.map((c, i) => (
                   <th key={c} className={cn('px-4 py-4 text-center text-[13px] font-medium', i === 0 ? 'text-foreground' : 'text-muted-foreground')}>
-                    {i === 0 ? <span className="font-wordmark text-[15px] font-[379]">{c}</span> : c}
+                    {i === 0 ? <span className="font-wordmark text-[15px] font-medium tracking-[-0.02em]">{c}</span> : c}
                   </th>
                 ))}
               </tr>

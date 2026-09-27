@@ -1,5 +1,6 @@
 import { motion, useReducedMotion } from 'framer-motion';
 import type * as React from 'react';
+import { cn } from '@/lib/utils';
 
 // Fade and un-blur into place once scrolled into view, like the app's entrances.
 export function Reveal({ children, delay = 0, className }: { children: React.ReactNode; delay?: number; className?: string }) {
@@ -17,12 +18,10 @@ export function Reveal({ children, delay = 0, className }: { children: React.Rea
   );
 }
 
-export function SectionHeading({ eyebrow, title, children }: { eyebrow: string; title: string; children?: React.ReactNode }) {
+export function SectionTitle({ children, className }: { children: React.ReactNode; className?: string }) {
   return (
-    <Reveal className="mx-auto mb-12 max-w-2xl text-center">
-      <div className="text-arc mb-3 font-mono text-[11px] tracking-[0.2em] uppercase">{eyebrow}</div>
-      <h2 className="font-display text-[34px] leading-[1.12] font-medium tracking-[-0.02em] text-balance max-sm:text-[28px]">{title}</h2>
-      {children ? <p className="text-muted-foreground mt-4 text-[15.5px] leading-relaxed text-balance">{children}</p> : null}
+    <Reveal className={cn('mx-auto mb-14 max-w-3xl text-center', className)}>
+      <h2 className="font-display text-[40px] leading-[1.08] font-medium tracking-[-0.03em] text-balance max-sm:text-[30px]">{children}</h2>
     </Reveal>
   );
 }

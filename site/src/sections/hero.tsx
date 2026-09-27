@@ -24,28 +24,24 @@ export function Hero() {
       <ArcBackdrop className="-z-10" />
       {/* Soft fade into the page below the arc */}
       <div aria-hidden className="from-background pointer-events-none absolute inset-x-0 bottom-0 -z-10 h-40 bg-linear-to-t to-transparent" />
-      <div className="mx-auto flex w-full max-w-3xl flex-1 flex-col items-center justify-center px-6 pt-[30vh] pb-20 text-center max-md:pt-[34vh]">
-        <motion.a
-          {...rise(0.1)}
-          href={GITHUB_URL}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="text-muted-foreground hover:text-foreground mb-7 inline-flex items-center gap-2 rounded-full border bg-white/[0.03] px-3.5 py-1 text-[12.5px] backdrop-blur transition-colors"
-        >
-          <span className="bg-arc size-1.5 rounded-full shadow-[0_0_10px_2px_rgba(163,158,244,0.6)]" />
-          Open source · OpenAI-compatible API
-        </motion.a>
+      <div className="mx-auto flex w-full max-w-3xl flex-1 flex-col items-center justify-center px-6 pt-[27vh] pb-20 text-center max-md:pt-[33vh]">
         <motion.h1
-          {...rise(0.2)}
-          className="font-display text-[56px] leading-[1.04] font-medium tracking-[-0.035em] text-balance max-md:text-[40px] max-sm:text-[34px]"
+          {...rise(0.15)}
+          className="font-wordmark text-[128px] leading-[0.9] font-medium tracking-[-0.055em] max-lg:text-[104px] max-md:text-[84px] max-sm:text-[64px]"
+        >
+          OneRoute
+        </motion.h1>
+        <motion.p
+          {...rise(0.25)}
+          className="font-display text-foreground/90 mt-6 text-[26px] leading-snug font-normal tracking-[-0.02em] text-balance max-sm:text-[21px]"
         >
           The routing architecture defined by speed and efficiency.
-        </motion.h1>
-        <motion.p {...rise(0.32)} className="text-muted-foreground mt-6 max-w-xl text-[17px] leading-relaxed text-balance max-sm:text-[15.5px]">
+        </motion.p>
+        <motion.p {...rise(0.35)} className="text-muted-foreground mt-4 max-w-xl text-[17px] leading-relaxed text-balance max-sm:text-[15.5px]">
           One API for 100+ models. OneRoute reads every request and sends it to the model and reasoning effort that fits: frontier answers
           when they matter, fast and cheap ones when they don’t.
         </motion.p>
-        <motion.div {...rise(0.44)} className="mt-9 flex flex-wrap items-center justify-center gap-3">
+        <motion.div {...rise(0.45)} className="mt-10 flex flex-wrap items-center justify-center gap-3">
           <Button asChild size="lg" className="group rounded-full px-6 text-[14.5px]">
             <a href={QUICK_START_URL} target="_blank" rel="noopener noreferrer">
               Get started

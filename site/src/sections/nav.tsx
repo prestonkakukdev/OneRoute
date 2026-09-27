@@ -6,7 +6,7 @@ import { NAV, QUICK_START_URL } from '@/content';
 import { cn } from '@/lib/utils';
 
 export function Wordmark({ className }: { className?: string }) {
-  return <span className={cn('font-wordmark text-[18px] leading-none font-[379] tracking-[-0.01em]', className)}>OneRoute</span>;
+  return <span className={cn('font-wordmark text-[19px] leading-none font-medium tracking-[-0.03em]', className)}>OneRoute</span>;
 }
 
 export function Nav() {
