@@ -58,6 +58,12 @@ function historyFrom(turns: Turn[]): ChatMessage[] {
   return out;
 }
 
+// A chat's title is its first message, on one line and short enough for the sidebar.
+function chatTitle(text: string): string {
+  const line = text.replace(/\s+/g, ' ').trim();
+  return line.length > 80 ? `${line.slice(0, 79).trimEnd()}…` : line || 'New chat';
+}
+
 const chatIdFromUrl = () => new URLSearchParams(location.search).get('c') ?? undefined;
 function setChatInUrl(id?: string) {
   const url = new URL(location.href);
@@ -185,13 +191,22 @@ export default function App() {
     }
   }, []);
 
+  // Turns whose save failed, per chat; they are sent again (in order) with that chat's next save.
+  const unsaved = React.useRef(new Map<string, Map<string, { turn: Turn; title: string }>>());
   const saveTurn = React.useCallback(
     async (chatId: string, turn: Turn, title: string) => {
+      const queue = unsaved.current.get(chatId) ?? new Map<string, { turn: Turn; title: string }>();
+      queue.set(turn.id, { turn, title: chatTitle(title) });
+      unsaved.current.set(chatId, queue);
       try {
-        await chats.saveTurn(chatId, turn, title);
+        for (const [id, item] of queue) {
+          await chats.saveTurn(chatId, item.turn, item.title);
+          queue.delete(id);
+        }
+        setChatError(undefined);
         void refreshChats();
       } catch (err) {
-        setChatError(`Could not save this chat: ${(err as Error).message}`);
+        setChatError(`Could not save this chat (it will retry with your next message): ${(err as Error).message}`);
       }
     },
     [refreshChats],

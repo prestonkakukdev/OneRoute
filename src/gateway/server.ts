@@ -217,7 +217,8 @@ export function createApp(store: Store, router: Router, executor = new Executor(
 
   // Saved chats. Turns are stored as the app sends them (including attachments, so a reopened chat can
   // continue with the same files).
-  const chatTurnSchema = z.object({ title: z.string().max(500), turn: z.object({ id: z.string() }).loose() });
+  // Titles come from the first message, which can be any length; the store shortens them.
+  const chatTurnSchema = z.object({ title: z.string(), turn: z.object({ id: z.string().min(1) }).loose() });
   app.get('/ui/api/chats', (c) => c.json(store.listChats()));
   app.get('/ui/api/chats/:id', (c) => {
     const chat = store.getChat(c.req.param('id'));
@@ -225,7 +226,8 @@ export function createApp(store: Store, router: Router, executor = new Executor(
   });
   app.put('/ui/api/chats/:id/turns/:turnId', async (c) => {
     const parsed = chatTurnSchema.safeParse(await c.req.json().catch(() => null));
-    if (!parsed.success || parsed.data.turn.id !== c.req.param('turnId')) return openAiError(c, 400, 'Expected { title, turn } with a matching turn id');
+    if (!parsed.success) return openAiError(c, 400, `Invalid chat turn: ${parsed.error.issues.map((i) => `${i.path.join('.') || 'body'}: ${i.message}`).join('; ')}`);
+    if (parsed.data.turn.id !== c.req.param('turnId')) return openAiError(c, 400, 'The turn id in the body does not match the URL');
     store.saveChatTurn(c.req.param('id'), c.req.param('turnId'), parsed.data.turn, parsed.data.title);
     return c.json({ ok: true });
   });

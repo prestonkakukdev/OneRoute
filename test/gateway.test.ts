@@ -267,3 +267,17 @@ describe('saved chats', () => {
     expect((await put('c3', { id: 'mismatch' }).then(() => app.request('/ui/api/chats/c3/turns/other', { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ title: 'x', turn: { id: 'nope' } }) }))).status).toBe(400);
   });
 });
+
+describe('saved chat titles', () => {
+  it('saves a chat whose first message is very long, shortening the title', async () => {
+    const { app, store } = setup();
+    const long = 'So ive been hearing a lot about autonomous agents causing problems. '.repeat(20);
+    const res = await app.request('/ui/api/chats/c-long/turns/t1', {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ title: long, turn: { id: 't1', prompt: long } }),
+    });
+    expect(res.status).toBe(200);
+    expect(store.getChat('c-long')!.title.length).toBeLessThanOrEqual(120);
+  });
+});
