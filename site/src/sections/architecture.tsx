@@ -7,7 +7,7 @@ import { BAND_CELL, Band } from './stats';
 export function Architecture() {
   return (
     <section id="architecture" className="mx-auto max-w-6xl px-6 pb-32">
-      <SectionTitle>A classifier reads. Plain code decides.</SectionTitle>
+      <SectionTitle sub="See how it compares.">A classifier reads. Plain code decides.</SectionTitle>
       {/* Same width as the comparison table below, in a rounded frame */}
       <Band className="overflow-hidden rounded-3xl border">
         {STEPS.map((s, i) => (
@@ -18,6 +18,7 @@ export function Architecture() {
           </Reveal>
         ))}
       </Band>
+      <Comparison />
     </section>
   );
 }
@@ -34,10 +35,10 @@ function Cell({ value, highlight }: { value: boolean | string | null; highlight?
   return <span className="text-muted-foreground text-[13px]">{value}</span>;
 }
 
-export function Comparison() {
+// Sits under the architecture steps, in the same section and at the same width.
+function Comparison() {
   return (
-    <section id="why" className="mx-auto max-w-6xl px-6 pb-32">
-      <SectionTitle>How OneRoute compares</SectionTitle>
+    <div id="why" className="mt-10">
       <Reveal>
         <div className="overflow-x-auto rounded-2xl border">
           <table className="w-full min-w-[640px] border-collapse text-left text-[14px]">
@@ -66,6 +67,6 @@ export function Comparison() {
           </table>
         </div>
       </Reveal>
-    </section>
+    </div>
   );
 }
