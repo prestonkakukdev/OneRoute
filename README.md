@@ -259,9 +259,9 @@ oneroute route --json "..."               # full decision, including Jev's raw a
 
 ## Landing page
 
-`site/` is the public landing page (React + Tailwind, same design system as the app, shadcn layout in
-`site/src/components/ui`). It is static: `npm run site:build` writes `site/dist`, which any static host (Vercel,
-Netlify, Cloudflare Pages, GitHub Pages) can serve. `npm run site:dev` runs it on http://localhost:5174. All copy and
+`site/` is the public landing page, live at **https://oneroute-cyan.vercel.app** (Vercel, deployed from `main` on every
+push that touches the site; see `vercel.json`). It's React + Tailwind in the app's design system (shadcn layout in
+`site/src/components/ui`) and fully static: `npm run site:build` writes `site/dist`, which any static host can serve. `npm run site:dev` runs it on http://localhost:5174. All copy and
 metrics live in `site/src/content.ts`; figures marked `estimate: true` are targets, shown with an asterisk, until
 benchmarks replace them. `npx tsx site/scripts/arc-image.ts` re-renders the arc artwork from the app's geometry.
 
