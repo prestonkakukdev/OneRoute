@@ -1,6 +1,6 @@
 import { motion, useReducedMotion } from 'framer-motion';
-import { arcBand, arcLine, bandEdge } from '@/lib/arc';
-import { cn } from '@/lib/utils';
+import { arcBand, arcLine, bandEdge } from '../lib/arc';
+import { cn } from '../lib/utils';
 
 // A large glowing blue arc (a planet's horizon seen from space), drawn in SVG so it stays sharp at any
 // size. The shape comes from lib/arc (a parabola with a tapered band); the layers are blurred.

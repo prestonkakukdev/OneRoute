@@ -257,6 +257,14 @@ oneroute bench bench/sample.txt           # route a prompt set in every mode; no
 oneroute route --json "..."               # full decision, including Jev's raw answers and all candidates
 ```
 
+## Landing page
+
+`site/` is the public landing page (React + Tailwind, same design system as the app, shadcn layout in
+`site/src/components/ui`). It is static: `npm run site:build` writes `site/dist`, which any static host (Vercel,
+Netlify, Cloudflare Pages, GitHub Pages) can serve. `npm run site:dev` runs it on http://localhost:5174. All copy and
+metrics live in `site/src/content.ts`; figures marked `estimate: true` are targets, shown with an asterisk, until
+benchmarks replace them. `npx tsx site/scripts/arc-image.ts` re-renders the arc artwork from the app's geometry.
+
 ## Development
 
 ```bash

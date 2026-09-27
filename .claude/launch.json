@@ -9,8 +9,24 @@
     {
       "name": "router-ui-standalone",
       "runtimeExecutable": "sh",
-      "runtimeArgs": ["-c", "npm run web:build --silent >/dev/null && npx tsx src/cli/index.ts serve --port 8788"],
+      "runtimeArgs": [
+        "-c",
+        "npm run web:build --silent >/dev/null && npx tsx src/cli/index.ts serve --port 8788"
+      ],
       "port": 8788
+    },
+    {
+      "name": "site",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": [
+        "run",
+        "site:dev",
+        "--",
+        "--port",
+        "5174",
+        "--strictPort"
+      ],
+      "port": 5174
     }
   ]
 }
