@@ -9,7 +9,7 @@ export function Architecture() {
     <section id="architecture" className="mx-auto max-w-6xl px-6 pb-32">
       <SectionTitle>A classifier reads. Plain code decides.</SectionTitle>
       {/* Same width as the comparison table below, in a rounded frame */}
-      <Band className="overflow-hidden rounded-3xl border bg-white/[0.015]">
+      <Band className="overflow-hidden rounded-3xl border">
         {STEPS.map((s, i) => (
           <Reveal key={s.n} delay={i * 0.08} className={cn(BAND_CELL, 'gap-3 px-8 py-10 max-xl:px-7')}>
             <div className="text-arc font-mono text-[12px]">{s.n}</div>
