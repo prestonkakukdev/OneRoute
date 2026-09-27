@@ -11,7 +11,7 @@ export function About() {
         <p className="font-display text-[44px] leading-[1.1] font-medium tracking-[-0.03em] text-balance max-md:text-[34px] max-sm:text-[27px]">
           Most requests don’t need the most expensive model.{' '}
           <span className="bg-linear-to-r from-[#c3bfff] via-[#a39ef4] to-[#6f5cff] bg-clip-text text-transparent">
-            The ones that do need it at the right effort.
+            OneRoute picks the one that fits.
           </span>
         </p>
       </Reveal>

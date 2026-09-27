@@ -36,7 +36,7 @@ export function Api() {
 
   return (
     <section id="api" className="mx-auto max-w-6xl px-6 pb-32">
-      <SectionTitle>Set the model to auto.</SectionTitle>
+      <SectionTitle sub="Includes an OpenAI-compatible API.">Compatible with your own code.</SectionTitle>
       <Reveal className="bg-card overflow-hidden rounded-2xl border">
         <div className="flex items-center justify-between border-b px-3 py-2">
           <div className="flex gap-1" role="tablist" aria-label="Language">

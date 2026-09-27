@@ -6,22 +6,18 @@ import { BAND_CELL, Band } from './stats';
 
 export function Architecture() {
   return (
-    <section id="architecture" className="pb-32">
+    <section id="architecture" className="mx-auto max-w-6xl px-6 pb-32">
       <SectionTitle>A classifier reads. Plain code decides.</SectionTitle>
-      <Band>
+      {/* Same width as the comparison table below, in a rounded frame */}
+      <Band className="overflow-hidden rounded-3xl border bg-white/[0.015]">
         {STEPS.map((s, i) => (
-          <Reveal key={s.n} delay={i * 0.08} className={cn(BAND_CELL, 'gap-3')}>
+          <Reveal key={s.n} delay={i * 0.08} className={cn(BAND_CELL, 'gap-3 px-8 py-10 max-xl:px-7')}>
             <div className="text-arc font-mono text-[12px]">{s.n}</div>
             <h3 className="font-display text-[26px] leading-none font-medium tracking-[-0.02em]">{s.title}</h3>
             <p className="text-muted-foreground max-w-[17rem] text-[14.5px] leading-snug">{s.body}</p>
           </Reveal>
         ))}
       </Band>
-      <Reveal delay={0.1} className="mt-14 px-6 text-center">
-        <code className="font-mono text-[22px] tracking-tight max-md:text-[17px] max-sm:text-[14px]">
-          score = <span className="text-arc">P(success)</span> × value − cost − wait
-        </code>
-      </Reveal>
     </section>
   );
 }
@@ -41,7 +37,7 @@ function Cell({ value, highlight }: { value: boolean | string | null; highlight?
 export function Comparison() {
   return (
     <section id="why" className="mx-auto max-w-6xl px-6 pb-32">
-      <SectionTitle>Built to decide, not to guess.</SectionTitle>
+      <SectionTitle>How OneRoute compares</SectionTitle>
       <Reveal>
         <div className="overflow-x-auto rounded-2xl border">
           <table className="w-full min-w-[640px] border-collapse text-left text-[14px]">
