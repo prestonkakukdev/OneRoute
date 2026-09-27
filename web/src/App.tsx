@@ -191,23 +191,28 @@ export default function App() {
     }
   }, []);
 
-  // Turns whose save failed, per chat; they are sent again (in order) with that chat's next save.
+  // Turns not yet confirmed saved, per chat (latest version of each). Saves run one at a time, so an
+  // earlier save can never land after, and overwrite, a later one; failures are retried with the next save.
   const unsaved = React.useRef(new Map<string, Map<string, { turn: Turn; title: string }>>());
+  const saving = React.useRef<Promise<void>>(Promise.resolve());
   const saveTurn = React.useCallback(
-    async (chatId: string, turn: Turn, title: string) => {
+    (chatId: string, turn: Turn, title: string) => {
       const queue = unsaved.current.get(chatId) ?? new Map<string, { turn: Turn; title: string }>();
       queue.set(turn.id, { turn, title: chatTitle(title) });
       unsaved.current.set(chatId, queue);
-      try {
-        for (const [id, item] of queue) {
-          await chats.saveTurn(chatId, item.turn, item.title);
-          queue.delete(id);
+      saving.current = saving.current.then(async () => {
+        try {
+          for (const [id, item] of [...queue]) {
+            await chats.saveTurn(chatId, item.turn, item.title);
+            if (queue.get(id) === item) queue.delete(id);
+          }
+          setChatError(undefined);
+          void refreshChats();
+        } catch (err) {
+          setChatError(`Could not save this chat (it will retry with your next message): ${(err as Error).message}`);
         }
-        setChatError(undefined);
-        void refreshChats();
-      } catch (err) {
-        setChatError(`Could not save this chat (it will retry with your next message): ${(err as Error).message}`);
-      }
+      });
+      return saving.current;
     },
     [refreshChats],
   );
@@ -317,6 +322,8 @@ export default function App() {
       updateTurn(id, () => patch);
     };
     setTurns((all) => [...all, turn]);
+    // Saved as soon as it's sent, so a chat exists even if the answer never finishes or the app is closed.
+    void saveTurn(chatId, turn, title);
     setChatInUrl(chatId);
     setSelectedId(id);
     history.current = [...history.current, { role: 'user', content }];
