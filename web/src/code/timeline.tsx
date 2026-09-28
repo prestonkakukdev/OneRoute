@@ -114,7 +114,7 @@ export interface ApprovalItem {
   allowed?: boolean;
 }
 export type TimelineItem =
-  | { kind: 'user'; seq?: number; text: string; mode?: string; permission?: string; checkpoint?: number; restored?: boolean }
+  | { kind: 'user'; seq?: number; text: string; mode?: string; permission?: string; checkpoint?: number; restored?: boolean; auto?: boolean }
   | { kind: 'route'; modelId: string; effort: string; why: string[]; role: string }
   | { kind: 'assistant'; text: string }
   | ToolItem
@@ -131,6 +131,7 @@ export type TimelineItem =
   | { kind: 'verification'; attempt: number; results: CheckRow[] }
   | { kind: 'compacted'; how: string; detail: number }
   | { kind: 'step'; costUsd: number }
+  | { kind: 'retry'; message: string; attempt: number; of: number; switchedTo?: string }
   | { kind: 'finished'; reason: string; summary?: string; verified?: string; next_steps?: string; checks?: string };
 
 // Folds the event stream into timeline items (tool results attach to their calls, approvals resolve in place).
@@ -155,6 +156,10 @@ export function buildTimeline(events: CodeEvent[]): TimelineItem[] {
       items.push({ kind: 'step', costUsd: Number(d.costUsd ?? 0) });
       continue;
     }
+    if (type === 'retry') {
+      if (!helper) items.push({ kind: 'retry', message: String(d.message ?? ''), attempt: Number(d.attempt ?? 1), of: Number(d.of ?? 2), switchedTo: d.switchedTo as string | undefined });
+      continue;
+    }
     if (type === 'subagent_start') {
       const h: HelperItem = { kind: 'helper', id: String(d.id), role: String(d.role), label: String(d.label), task: String(d.task ?? ''), modelId: String(d.modelId), effort: String(d.effort), why: (d.why as string[]) ?? [], tools: [], steps: 0, costUsd: 0 };
       helpers.set(h.id, h);
@@ -171,7 +176,7 @@ export function buildTimeline(events: CodeEvent[]): TimelineItem[] {
       continue;
     }
     if (type === 'user') {
-      const u = { kind: 'user' as const, seq, text: String(d.text ?? ''), mode: d.mode as string, permission: d.permission as string };
+      const u = { kind: 'user' as const, seq, text: String(d.text ?? ''), mode: d.mode as string, permission: d.permission as string, auto: Boolean(d.auto) };
       if (seq) users.set(seq, u);
       items.push(u);
     } else if (type === 'checkpoint') {
@@ -487,7 +492,7 @@ export function Timeline({
   onApprove: (approvalId: string, allow: boolean) => void;
   onOpenChanges: () => void;
   onRestore: (turn: number, text: string) => void;
-  onResume: () => void;
+  onResume: (reason: string) => void;
   onOpenMemory: () => void;
 }) {
   const segs = React.useMemo(() => segments(items), [items]);
@@ -502,7 +507,14 @@ export function Timeline({
       return next;
     });
 
-  const renderUser = (it: UserItem, key: string) => (
+  // A message OneRoute sent for the user (Resume / Retry) is a note, not a speech bubble.
+  const renderUser = (it: UserItem, key: string) =>
+    it.auto ? (
+      <motion.div key={key} {...enter} className="text-muted-foreground mt-3 flex items-center gap-2 text-[12.5px]">
+        <PlayIcon className="size-3.5" aria-hidden />
+        {it.text.startsWith('The last step failed') ? 'Retried after the error' : 'Resumed after the restart'}
+      </motion.div>
+    ) : (
     <motion.div key={key} {...enter} className="group mt-3 flex flex-col items-end gap-1 self-end first:mt-0" style={{ maxWidth: '85%' }}>
       <div className="bg-muted rounded-[14px_14px_4px_14px] px-4 py-2.5 text-[15px] whitespace-pre-wrap shadow-[inset_0_0_0_1px_rgba(123,123,123,0.12)]">{it.text}</div>
       <div className="flex items-center gap-2">
@@ -540,10 +552,10 @@ export function Timeline({
       ) : null}
       {it.verified ? <p className="text-muted-foreground mt-2 text-[13px] whitespace-pre-wrap">Verified: {unescape(it.verified)}</p> : null}
       {it.next_steps ? <p className="text-muted-foreground mt-1.5 text-[13px] whitespace-pre-wrap">Next: {unescape(it.next_steps)}</p> : null}
-      {it.reason === 'interrupted' && it === lastFinished && !running ? (
-        <button type="button" onClick={onResume} className="mt-3 inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-lg bg-linear-to-b from-[#f7f7f7] to-white px-3 text-[12.5px] font-medium text-black active:scale-[0.97]">
+      {(it.reason === 'interrupted' || it.reason === 'error') && it === lastFinished && !running ? (
+        <button type="button" onClick={() => onResume(it.reason)} className="mt-3 inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-lg bg-linear-to-b from-[#f7f7f7] to-white px-3 text-[12.5px] font-medium text-black active:scale-[0.97]">
           <PlayIcon className="size-3.5" aria-hidden />
-          Resume
+          {it.reason === 'error' ? 'Retry' : 'Resume'}
         </button>
       ) : null}
     </motion.div>
@@ -601,6 +613,16 @@ export function Timeline({
             <motion.button key={key} {...enter} type="button" onClick={onOpenChanges} className="text-muted-foreground hover:text-foreground cursor-pointer self-start text-[12px] transition-colors">
               {it.files.length} file{it.files.length === 1 ? '' : 's'} changed · view changes
             </motion.button>
+          );
+        case 'retry':
+          return (
+            <motion.div key={key} {...enter} className="text-warn/90 flex items-start gap-2 text-[12.5px]">
+              <RotateCcwIcon className="mt-0.5 size-3.5 shrink-0" aria-hidden />
+              <span>
+                The connection to the model dropped ({it.message}).{' '}
+                {it.switchedTo ? `Switched to ${it.switchedTo.split('/')[1] ?? it.switchedTo} and trying again.` : `Trying again (${it.attempt} of ${it.of}).`}
+              </span>
+            </motion.div>
           );
         case 'verifying':
           return (

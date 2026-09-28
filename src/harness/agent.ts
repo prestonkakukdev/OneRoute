@@ -63,6 +63,17 @@ const LOOP_REPEATS = 3;
 // Automatic checks that fail send the agent back to fix them this many times before the run ends anyway.
 const CHECK_RETRIES: Record<Mode, number> = { cheap: 1, balanced: 2, best: 3 };
 
+// A failed model turn is retried this many times (the last retry on the next-best model).
+const STEP_RETRIES = 2;
+
+// Errors worth another try: the provider stalled, was overloaded or rate-limited, or the stream broke. A request the
+// provider rejects (bad input, context too long) fails the same way again, so it isn't retried.
+export function retryable(err: unknown): boolean {
+  const status = (err as { status?: number }).status;
+  if (status !== undefined) return status === 408 || status === 409 || status === 425 || status === 429 || status >= 500;
+  return /timeout|timed out|idle|overloaded|rate.?limit|capacity|unavailable|temporar|upstream|terminated|socket|ECONNRESET|EPIPE|network|fetch failed|stream|5\d\d/i.test((err as Error).message ?? '');
+}
+
 // Keeps what a session teaches about a project: short, durable, and never secret.
 const LEARN_PROMPT = `You keep a short memory of durable facts about a software project for a coding agent that works on it.
 From the session below, pick out what future sessions should know that is not obvious from the code itself:
@@ -200,12 +211,21 @@ export class CodeHarness {
     }
   }
 
-  continueSession(sessionId: string, prompt: string, opts: RunOptions): void {
+  // `auto` marks a message OneRoute wrote (resume, retry) rather than the user: it isn't learned from.
+  continueSession(sessionId: string, prompt: string, opts: RunOptions, auto = false): void {
     if (this.active.has(sessionId)) throw new Error('This session is already running.');
     const s = this.store.getCodeSession(sessionId);
     if (!s || s.status === 'discarded') throw new Error('Unknown session');
     if (s.inPlace) this.assertFolderFree(s.worktree, sessionId);
-    void this.run(sessionId, prompt, opts);
+    void this.run(sessionId, prompt, opts, auto);
+  }
+
+  // Carries on after a run stopped by an error or a restart; the conversation was saved after its last full step.
+  resume(sessionId: string, opts: RunOptions): void {
+    const s = this.store.getCodeSession(sessionId);
+    if (!s) throw new Error('Unknown session');
+    const why = s.status === 'error' ? 'The last step failed with an error.' : 'The run was interrupted by a restart.';
+    this.continueSession(sessionId, `${why} Carry on with the task from where you left off; check the current state of the files first.`, opts, true);
   }
 
   isRunning(sessionId: string): boolean {
@@ -365,6 +385,7 @@ export class CodeHarness {
       'How to work:',
       '- Explore before changing things: list_files, grep, read_file. Read a file before editing it.',
       '- Make small, precise edits with edit_file; create new files with write_file. Match the project’s style and conventions.',
+      '- Keep every tool call reasonably small (a few hundred lines at most). Build a big file in parts: write the skeleton first, then add sections with edit_file. Keep embedded data (word lists, fixtures) modest, or put it in its own file.',
       '- Verify your work: run the project’s tests, type checks or build with bash when they exist, and fix what you break.',
       '- Anything a browser shows (HTML, CSS, front-end JS, web apps): check it with check_page, which opens it in a real headless browser. Look for console errors, and use steps and read to try the interaction you built (type into inputs, click buttons, read the results).',
       '- A page the user opens straight from disk (file://) cannot load <script type="module"> or fetch local files; for plain pages use classic <script src> tags, or give the project a dev server.',
@@ -389,13 +410,13 @@ export class CodeHarness {
       .join('\n');
   }
 
-  private async run(sessionId: string, prompt: string, opts: RunOptions): Promise<void> {
+  private async run(sessionId: string, prompt: string, opts: RunOptions, auto = false): Promise<void> {
     const session = this.store.getCodeSession(sessionId)!;
     const run: ActiveRun = { controller: new AbortController(), approvals: new Map() };
     this.active.set(sessionId, run);
     const signal = run.controller.signal;
     this.store.updateCodeSession(sessionId, { status: 'running' });
-    const turn = this.emit(sessionId, 'user', { text: prompt, mode: opts.mode, permission: opts.permission })!;
+    const turn = this.emit(sessionId, 'user', { text: prompt, mode: opts.mode, permission: opts.permission, ...(auto ? { auto: true } : {}) })!;
     const checkpoints = new Checkpoints(sessionId, session.worktree);
     checkpoints.beginTurn(turn);
 
@@ -436,8 +457,9 @@ export class CodeHarness {
       });
       const contextLength = this.store.listModels({ includeDisabled: true }).find((m) => m.id === routed.modelId)?.contextLength ?? 128_000;
       const limits = compactionLimits(opts.mode, contextLength);
+      let current = routed; // becomes the next-best model if the chosen one keeps failing
       const nextDecision = (): RouteDecision => {
-        const d = { ...routed, requestId: `rt_${randomUUID().replaceAll('-', '').slice(0, 20)}` };
+        const d = { ...current, requestId: `rt_${randomUUID().replaceAll('-', '').slice(0, 20)}` };
         this.store.recordDecision(d, `[code] ${session.title} · step`);
         return d;
       };
@@ -451,19 +473,12 @@ export class CodeHarness {
         steps += 1;
         const stepDecision = steps === 1 ? routed : nextDecision();
 
-        const result = await this.executor.execute({ messages, tools: toolDefs, tool_choice: 'auto', stream: true }, stepDecision, signal);
-        if (!result.response.ok || !result.response.body) {
-          const text = await result.response.text();
-          let message = text.slice(0, 400);
-          try {
-            message = (JSON.parse(text) as { error?: { message?: string } }).error?.message ?? message;
-          } catch {}
-          throw new Error(message);
-        }
-        const turnResult = await readTurn(
-          result.response.body,
-          (t) => this.emit(sessionId, 'text_delta', { text: t }, false),
-          () => this.emit(sessionId, 'thinking', {}, false),
+        const { result, turn: turnResult } = await this.streamStep(
+          sessionId,
+          { messages, tools: toolDefs, tool_choice: 'auto', stream: true },
+          stepDecision,
+          signal,
+          { onText: (t) => this.emit(sessionId, 'text_delta', { text: t }, false), onThinking: () => this.emit(sessionId, 'thinking', {}, false), onSwitch: (d) => (current = d) },
         );
         const cost = turnResult.usage?.cost ?? 0;
         this.store.updateCodeSession(sessionId, { addCost: cost });
@@ -567,7 +582,8 @@ export class CodeHarness {
       // Learn from the session in the background: corrections from the user and things that failed.
       const done = finished as Finished | undefined;
       const checksFailed = checkResults?.some((r) => !r.ok) ?? false;
-      const followUp = history.some((m) => m.role === 'user');
+      // A follow-up from the user themselves (often a correction); messages OneRoute wrote don't count.
+      const followUp = !auto && this.store.codeEvents(sessionId, 0).filter((e) => e.type === 'user' && !(e.data as { auto?: boolean }).auto).length > 1;
       if (done && ['finish', 'answered', 'paused'].includes(done.reason) && (followUp || failures.length >= 2 || checksFailed)) {
         void this.learn(session, done.summary ?? '', [...failures, ...(checkResults ?? []).filter((r) => !r.ok).map((r) => `${r.name} check: ${r.output.slice(0, 300)}`)]).catch((err: Error) =>
           console.warn(`[code] memory extraction failed for session ${sessionId}: ${err.message}`),
@@ -582,7 +598,7 @@ export class CodeHarness {
   private async learn(session: CodeSession, summary: string, failures: string[]): Promise<void> {
     const prompts = this.store
       .codeEvents(session.id, 0)
-      .filter((e) => e.type === 'user')
+      .filter((e) => e.type === 'user' && !(e.data as { auto?: boolean }).auto)
       .map((e) => String((e.data as { text?: string }).text ?? ''))
       .slice(-5);
     const existing = this.store.listCodeMemory(session.projectId);
@@ -680,13 +696,13 @@ export class CodeHarness {
         if (steps > 1) this.store.recordDecision(d, `[code] ${session.title} · ${spec.label.toLowerCase()} step`);
         // Out of steps: the last turn may only report.
         const last = steps > maxSteps || repeats >= LOOP_REPEATS;
-        const result = await this.executor.execute(
+        const { result, turn: t } = await this.streamStep(
+          sessionId,
           { messages, tools: last ? toolDefinitions([REPORT_TOOL]) : toolDefs, tool_choice: last ? { type: 'function', function: { name: 'report' } } : 'auto', stream: true },
           d,
           signal,
+          { agent: id, onSwitch: (next) => (decision = next) },
         );
-        if (!result.response.ok || !result.response.body) throw new Error((await result.response.text()).slice(0, 300));
-        const t = await readTurn(result.response.body, () => {}, () => {});
         const stepCost = t.usage?.cost ?? 0;
         cost += stepCost;
         this.store.updateCodeSession(sessionId, { addCost: stepCost });
@@ -730,6 +746,48 @@ export class CodeHarness {
     report ??= { summary: signal.aborted ? 'Stopped.' : 'The helper ran out of steps before reporting.' };
     this.emit(sessionId, 'subagent_end', { id, role, report, steps, costUsd: cost });
     return { text: JSON.stringify({ helper: spec.label, ...report }), meta: { subagent: id } };
+  }
+
+  // One model turn, retried when the connection to the model fails (a provider going quiet mid-answer, overload,
+  // a dropped stream). The first retry uses the same model; the last one switches to the next-best model from the
+  // route, which the caller keeps for the rest of the run.
+  private async streamStep(
+    sessionId: string,
+    body: Record<string, unknown>,
+    decision: RouteDecision,
+    signal: AbortSignal,
+    hooks: { onText?: (t: string) => void; onThinking?: () => void; onSwitch?: (d: RouteDecision) => void; agent?: string },
+  ) {
+    let d = decision;
+    for (let attempt = 1; ; attempt++) {
+      try {
+        const result = await this.executor.execute(body as never, d, signal);
+        if (!result.response.ok || !result.response.body) {
+          const text = await result.response.text();
+          let message = text.slice(0, 400);
+          try {
+            message = (JSON.parse(text) as { error?: { message?: string } }).error?.message ?? message;
+          } catch {}
+          throw Object.assign(new Error(message), { status: result.response.status });
+        }
+        const turn = await readTurn(result.response.body, hooks.onText ?? (() => {}), hooks.onThinking ?? (() => {}));
+        return { result, turn };
+      } catch (err) {
+        if (signal.aborted || attempt > STEP_RETRIES || !retryable(err)) throw err;
+        const message = (err as Error).message;
+        const fresh = (next: RouteDecision) => ({ ...next, requestId: `rt_${randomUUID().replaceAll('-', '').slice(0, 20)}` });
+        let switchedTo: string | undefined;
+        const alt = attempt === STEP_RETRIES ? d.candidates.find((c) => c.modelId !== d.modelId) : undefined;
+        if (alt) {
+          d = fresh({ ...d, modelId: alt.modelId, effort: alt.effort });
+          switchedTo = alt.modelId;
+          hooks.onSwitch?.(d);
+        } else d = fresh(d);
+        this.store.recordDecision(d, `[code] retry after: ${message.slice(0, 80)}`);
+        this.emit(sessionId, 'retry', { attempt, of: STEP_RETRIES, message: message.slice(0, 300), switchedTo, ...(hooks.agent ? { agent: hooks.agent } : {}) });
+        await new Promise((r) => setTimeout(r, attempt * 2000));
+      }
+    }
   }
 
   // Replaces the older part of the conversation with a summary written by the run's model.

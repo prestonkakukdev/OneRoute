@@ -54,8 +54,6 @@ const PERMISSIONS: [Permission, string, string][] = [
 
 const PLACEHOLDERS = ['Describe what to build…', 'Fix the failing test in…', 'Add a dark mode toggle…', 'Refactor the auth module…', 'Explain how this project works…'];
 
-const RESUME_PROMPT = 'Carry on with the task from where you left off. The run was interrupted by a restart, so check the current state of the files before continuing.';
-
 // A system notification when a run waits for approval while the app isn't in view (the approval card is in the app).
 function askNotificationPermission() {
   if (typeof Notification !== 'undefined' && Notification.permission === 'default') void Notification.requestPermission().catch(() => {});
@@ -250,7 +248,7 @@ export function CodeWorkspace({
           return;
         }
         else {
-          if (['assistant', 'tool_call', 'finished', 'error'].includes(e.type)) setLive('');
+          if (['assistant', 'tool_call', 'finished', 'error', 'retry'].includes(e.type)) setLive('');
           if (e.type === 'user') setRunning(true);
           if (e.type === 'memory') setMemoryKey((k) => k + 1);
           // Only for new approvals, not ones replayed from the stored timeline when the session opens.
@@ -501,7 +499,7 @@ export function CodeWorkspace({
                 onApprove={(approvalId, allow) => void action(() => codeApi.approve(session.id, approvalId, allow))}
                 onOpenChanges={() => setTab('changes')}
                 onOpenMemory={() => setTab('memory')}
-                onResume={() => void action(() => codeApi.message(session.id, RESUME_PROMPT, mode, permission).then(() => setRunning(true)))}
+                onResume={() => void action(() => codeApi.resume(session.id, mode, permission).then(() => setRunning(true)))}
                 onRestore={(turn, text) =>
                   void action(async () => {
                     const short = text.length > 80 ? `${text.slice(0, 79)}…` : text;

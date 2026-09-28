@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
 import { Store } from '../src/db/store.js';
 import { Executor } from '../src/gateway/execute.js';
-import { CodeHarness, type CodeEvent } from '../src/harness/agent.js';
+import { CodeHarness, retryable, type CodeEvent } from '../src/harness/agent.js';
 import { checkPermission, classifyCommand } from '../src/harness/permissions.js';
 import { insideRoot, toolByName, toolDefinitions } from '../src/harness/tools.js';
 import { discardWorkspace, workspaceDiff } from '../src/harness/workspace.js';
@@ -475,5 +475,52 @@ describe('code harness: helpers, memory, wait, resume', () => {
     expect(store.getCodeSession('s1')!.status).toBe('interrupted');
     expect(store.codeEvents('s1', 0).at(-1)).toMatchObject({ type: 'finished', data: { reason: 'interrupted' } });
     expect(store.getCodeMessages('s1')).toEqual([{ role: 'user', content: 'do it' }]);
+  });
+});
+
+describe('code harness: model failures', () => {
+  const dropped = () =>
+    new Response(new Blob([`data: ${JSON.stringify({ choices: [{ delta: { content: 'Writing the game' } }] })}\n\ndata: ${JSON.stringify({ error: { message: 'Upstream idle timeout exceeded' } })}\n\n`]).stream(), {
+      headers: { 'content-type': 'text/event-stream' },
+    });
+
+  it('retries a step when the model’s stream drops, and carries on', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'oneroute-retry-'));
+    created.push(dir);
+    const { harness } = harnessWith([dropped(), turn({ calls: [{ name: 'write_file', args: { path: 'a.txt', content: 'hi\n' } }] }), turn({ calls: [{ name: 'finish', args: { summary: 'Done' } }] })]);
+    const project = await harness.addProject(dir);
+    const session = await harness.startSession(project.id, 'Write a file', { mode: 'balanced', permission: 'auto' });
+    const events = await untilFinished(harness, session.id);
+    expect(events.find((e) => e.type === 'retry')!.data).toMatchObject({ attempt: 1, message: 'Upstream idle timeout exceeded' });
+    expect(events.find((e) => e.type === 'finished')!.data).toMatchObject({ reason: 'finish' });
+    expect(readFileSync(join(dir, 'a.txt'), 'utf8')).toBe('hi\n');
+  }, 20_000);
+
+  it('retries dropped connections and overload, not requests the provider rejects', () => {
+    expect(retryable(new Error('Upstream idle timeout exceeded'))).toBe(true);
+    expect(retryable(Object.assign(new Error('busy'), { status: 429 }))).toBe(true);
+    expect(retryable(Object.assign(new Error('bad gateway'), { status: 502 }))).toBe(true);
+    expect(retryable(Object.assign(new Error('maximum context length exceeded'), { status: 400 }))).toBe(false);
+    expect(retryable(new Error('Invalid tool schema'))).toBe(false);
+  });
+});
+
+describe('code harness: resume', () => {
+  it('resumes with a message marked as written by OneRoute, which memory ignores', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'oneroute-resume-'));
+    created.push(dir);
+    const { harness, store } = harnessWith([turn({ text: 'first' }), turn({ text: 'carried on' })]);
+    const project = await harness.addProject(dir);
+    const session = await harness.startSession(project.id, 'Do the thing', { mode: 'cheap', permission: 'auto' });
+    await untilFinished(harness, session.id);
+    store.updateCodeSession(session.id, { status: 'error' });
+    const next = untilFinished(harness, session.id);
+    harness.resume(session.id, { mode: 'cheap', permission: 'auto' });
+    await next;
+    const users = store.codeEvents(session.id, 0).filter((e) => e.type === 'user').map((e) => e.data as { text: string; auto?: boolean });
+    expect(users.at(-1)).toMatchObject({ auto: true, text: expect.stringContaining('The last step failed') });
+    // No follow-up from the user, so nothing to learn: no memory call was made.
+    await new Promise((r) => setTimeout(r, 50));
+    expect(store.listCodeMemory(project.id)).toEqual([]);
   });
 });
