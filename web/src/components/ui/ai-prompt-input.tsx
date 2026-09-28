@@ -1409,6 +1409,8 @@ export type AiPromptActiveTool = {
 }
 
 export interface AiPromptInputProps {
+  /** "compact": a shorter composer with tighter padding and corners (Code mode). */
+  density?: "default" | "compact"
   /** Controlled prompt value. */
   value?: string
   /** Uncontrolled initial value. */
@@ -1729,11 +1731,13 @@ function RotatingPlaceholder({
   interval,
   active,
   reduceMotion,
+  compact = false,
 }: {
   phrases: readonly string[]
   interval: number
   active: boolean
   reduceMotion: boolean
+  compact?: boolean
 }) {
   const [index, setIndex] = React.useState(0)
   const safePhrases = phrases.length > 0 ? phrases : DEFAULT_PLACEHOLDERS
@@ -1759,7 +1763,7 @@ function RotatingPlaceholder({
       <AnimatePresence mode="wait" initial={false}>
         <motion.span
           key={current}
-          className="text-muted-foreground/70 block truncate text-[15px] leading-7 sm:text-base"
+          className={cn("text-muted-foreground/70 block truncate", compact ? "text-[14.5px] leading-6" : "text-[15px] leading-7 sm:text-base")}
           {...placeholderPresence(reduceMotion)}
         >
           {current}
@@ -2359,6 +2363,7 @@ function ActionButton({
 const AiPromptInput = React.forwardRef<HTMLTextAreaElement, AiPromptInputProps>(
   (
     {
+      density = "default",
       value: valueProp,
       defaultValue = "",
       onChange,
@@ -2601,7 +2606,8 @@ const AiPromptInput = React.forwardRef<HTMLTextAreaElement, AiPromptInputProps>(
         }
         transition={{ duration: 0.28, ease: EASE }}
         className={cn(
-          "bg-popover border-border relative w-full overflow-visible rounded-[1.75rem] border-2 p-3.5 sm:p-4",
+          "bg-popover border-border relative w-full overflow-visible border-2",
+          density === "compact" ? "rounded-[14px] px-3 py-2.5" : "rounded-[1.75rem] p-3.5 sm:p-4",
           "transition-[background-color,opacity] duration-200 ease-[cubic-bezier(0.2,0,0,1)]",
           disabled && "pointer-events-none opacity-55",
           talking && "ring-ring/30 ring-2",
@@ -2612,7 +2618,7 @@ const AiPromptInput = React.forwardRef<HTMLTextAreaElement, AiPromptInputProps>(
         <div
           ref={mirrorRef}
           aria-hidden
-          className="invisible absolute top-0 left-0 -z-10 px-1 text-[15px] leading-7 break-words whitespace-pre-wrap sm:text-base"
+          className={cn("invisible absolute top-0 left-0 -z-10 px-1 break-words whitespace-pre-wrap", density === "compact" ? "text-[14.5px] leading-6" : "text-[15px] leading-7 sm:text-base")}
         />
 
         <AnimatePresence initial={false}>
@@ -2659,11 +2665,13 @@ const AiPromptInput = React.forwardRef<HTMLTextAreaElement, AiPromptInputProps>(
 
         <div
           className={cn(
-            "relative min-h-7 transition-opacity duration-200 ease-[cubic-bezier(0.2,0,0,1)]",
+            "relative transition-opacity duration-200 ease-[cubic-bezier(0.2,0,0,1)]",
+            density === "compact" ? "min-h-6" : "min-h-7",
             talking && "pointer-events-none opacity-40"
           )}
         >
           <RotatingPlaceholder
+            compact={density === "compact"}
             phrases={placeholders}
             interval={placeholderInterval}
             active={showPlaceholder && !talking}
@@ -2692,7 +2700,7 @@ const AiPromptInput = React.forwardRef<HTMLTextAreaElement, AiPromptInputProps>(
             transition={SPRING_HEIGHT}
             className={cn(
               "text-foreground relative z-10 block w-full resize-none bg-transparent px-1",
-              "text-[15px] leading-7 sm:text-base",
+              density === "compact" ? "text-[14.5px] leading-6" : "text-[15px] leading-7 sm:text-base",
               "placeholder:text-transparent",
               "outline-none focus-visible:outline-none",
               "disabled:cursor-not-allowed",
@@ -2724,7 +2732,7 @@ const AiPromptInput = React.forwardRef<HTMLTextAreaElement, AiPromptInputProps>(
                 y: 0,
               }}
               transition={{ duration: 0.22, ease: EASE }}
-              className="border-border mt-3 flex items-center justify-between gap-2 border-t pt-3 sm:mt-3.5"
+              className={cn("border-border flex items-center justify-between gap-2 border-t", density === "compact" ? "mt-2 pt-2" : "mt-3 pt-3 sm:mt-3.5")}
             >
               <div
                 className={cn(

@@ -56,6 +56,7 @@
     "katex": "^0.18.9",
     "lucide-react": "^1.48.0",
     "marked": "^18.0.14",
+    "playwright-core": "^1.63.0",
     "react": "^19.3.0",
     "react-dom": "^19.3.0",
     "tailwind-merge": "^3.7.0",

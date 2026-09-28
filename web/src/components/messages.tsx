@@ -73,7 +73,7 @@ export async function copyText(text: string): Promise<boolean> {
   }
 }
 
-const Answer = React.memo(function Answer({ text }: { text: string }) {
+export const Answer = React.memo(function Answer({ text }: { text: string }) {
   const html = React.useMemo(() => renderMarkdown(text), [text]);
   // Code-block copy buttons come from the Markdown renderer; one delegated handler serves them all.
   const onClick = async (e: React.MouseEvent) => {

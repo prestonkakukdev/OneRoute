@@ -19,15 +19,22 @@ function groupLabel(iso: string, now = new Date()): string {
 const ICON_BTN =
   'text-muted-foreground/70 hover:bg-accent hover:text-foreground flex size-6.5 shrink-0 cursor-pointer items-center justify-center rounded-lg transition-colors duration-150 [&_svg]:size-3.5';
 
-function ChatItem({
+// A saved item with rename and delete in place (chats here, code sessions in Code mode).
+export function SidebarItem({
   chat,
   active,
+  leading,
+  noun = 'chat',
+  deleteHint,
   onOpen,
   onRename,
   onDelete,
 }: {
-  chat: ChatSummary;
+  chat: { title: string };
   active: boolean;
+  leading?: React.ReactNode;
+  noun?: string;
+  deleteHint?: string;
   onOpen: () => void;
   onRename: (title: string) => void;
   onDelete: () => void;
@@ -57,7 +64,7 @@ function ChatItem({
         <input
           ref={inputRef}
           value={title}
-          aria-label="Chat title"
+          aria-label={`${noun[0]!.toUpperCase()}${noun.slice(1)} title`}
           onChange={(e) => setTitle(e.target.value)}
           onBlur={commit}
           onKeyDown={(e) => {
@@ -70,16 +77,17 @@ function ChatItem({
           className="bg-background text-foreground m-1 h-7 min-w-0 flex-1 rounded-lg border px-2 text-[13px] outline-none"
         />
       ) : (
-        <button type="button" onClick={onOpen} title={chat.title} className="min-w-0 flex-1 cursor-pointer truncate px-2.5 py-2 text-left text-[13px]">
-          {chat.title}
+        <button type="button" onClick={onOpen} title={chat.title} className="flex min-w-0 flex-1 cursor-pointer items-center gap-2 px-2.5 py-2 text-left text-[13px]">
+          {leading}
+          <span className="truncate">{chat.title}</span>
         </button>
       )}
       {mode === 'confirm' ? (
         <div className="flex items-center gap-0.5">
-          <button type="button" onClick={onDelete} className="text-bad hover:bg-bad/10 h-6.5 cursor-pointer rounded-lg px-2 text-xs font-medium">
+          <button type="button" onClick={onDelete} title={deleteHint} className="text-bad hover:bg-bad/10 h-6.5 cursor-pointer rounded-lg px-2 text-xs font-medium">
             Delete
           </button>
-          <button type="button" aria-label="Keep chat" onClick={() => setMode('view')} className={ICON_BTN}>
+          <button type="button" aria-label={`Keep ${noun}`} onClick={() => setMode('view')} className={ICON_BTN}>
             <XIcon aria-hidden />
           </button>
         </div>
@@ -175,7 +183,7 @@ export function ChatSidebar({
                   <div className="text-muted-foreground/70 px-2.5 pb-1 text-[10px] font-semibold tracking-wide uppercase">{g.label}</div>
                   <div className="flex flex-col gap-0.5">
                     {g.items.map((c) => (
-                      <ChatItem
+                      <SidebarItem
                         key={c.id}
                         chat={c}
                         active={c.id === activeId}

@@ -147,6 +147,46 @@ CREATE TABLE IF NOT EXISTS chat_turns (
   PRIMARY KEY (chat_id, turn_id)
 );
 CREATE INDEX IF NOT EXISTS chats_updated ON chats(updated_at);
+-- Code mode: project folders the user added, agent sessions (one git worktree each), and each session's
+-- event timeline (what the UI replays).
+CREATE TABLE IF NOT EXISTS code_projects (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  path TEXT NOT NULL UNIQUE,
+  added_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS code_sessions (
+  id TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL,
+  title TEXT NOT NULL,
+  branch TEXT NOT NULL,
+  worktree TEXT NOT NULL,
+  base_ref TEXT NOT NULL,
+  base_commit TEXT NOT NULL,
+  status TEXT NOT NULL,
+  messages TEXT NOT NULL DEFAULT '[]', -- the model-facing conversation, for follow-up runs
+  cost_usd REAL NOT NULL DEFAULT 0,
+  in_place INTEGER NOT NULL DEFAULT 1, -- 1 = edits the project folder directly; 0 = its own git worktree and branch
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS code_events (
+  session_id TEXT NOT NULL,
+  seq INTEGER NOT NULL,
+  type TEXT NOT NULL,
+  data TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  PRIMARY KEY (session_id, seq)
+);
+-- What OneRoute Code has learned about a project (or the user wrote down): read at the start of every run.
+CREATE TABLE IF NOT EXISTS code_memory (
+  id TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL,
+  text TEXT NOT NULL,
+  source TEXT NOT NULL, -- 'learned' (extracted after a session) or 'user'
+  session_id TEXT,
+  created_at TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS meta (
   key TEXT PRIMARY KEY,
   value TEXT NOT NULL
@@ -154,6 +194,52 @@ CREATE TABLE IF NOT EXISTS meta (
 `;
 
 type Row = Record<string, unknown>;
+
+export interface CodeMemory {
+  id: string;
+  projectId: string;
+  text: string;
+  source: 'learned' | 'user';
+  sessionId?: string;
+  createdAt: string;
+}
+
+export interface CodeProject {
+  id: string;
+  name: string;
+  path: string;
+  addedAt: string;
+}
+
+export interface CodeSession {
+  id: string;
+  projectId: string;
+  title: string;
+  branch: string;
+  worktree: string;
+  baseRef: string;
+  baseCommit: string;
+  inPlace: boolean; // edits the project folder directly (worktree = the project folder)
+  status: string;
+  costUsd: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+const toCodeSession = (r: Record<string, unknown>): CodeSession => ({
+  id: r.id as string,
+  projectId: r.project_id as string,
+  title: r.title as string,
+  branch: r.branch as string,
+  worktree: r.worktree as string,
+  baseRef: r.base_ref as string,
+  baseCommit: r.base_commit as string,
+  inPlace: r.in_place === 1,
+  status: r.status as string,
+  costUsd: r.cost_usd as number,
+  createdAt: r.created_at as string,
+  updatedAt: r.updated_at as string,
+});
 
 export interface ChatSummary {
   id: string;
@@ -221,6 +307,10 @@ export class Store {
     this.db.exec(`UPDATE outcomes SET feedback_source = 'user' WHERE feedback_source IS NULL AND feedback_at IS NOT NULL`);
     const decisionCols = (this.db.prepare('PRAGMA table_info(decisions)').all() as Row[]).map((c) => c.name);
     if (!decisionCols.includes('use_web')) this.db.exec('ALTER TABLE decisions ADD COLUMN use_web INTEGER');
+    const codeCols = (this.db.prepare('PRAGMA table_info(code_sessions)').all() as Row[]).map((c) => c.name);
+    // Databases from before in-place sessions: their sessions all worked in separate worktrees, hence 0 (new
+    // tables default to 1, working in the folder).
+    if (!codeCols.includes('in_place')) this.db.exec('ALTER TABLE code_sessions ADD COLUMN in_place INTEGER NOT NULL DEFAULT 0');
     const sessionCols = (this.db.prepare('PRAGMA table_info(sessions)').all() as Row[]).map((c) => c.name);
     if (!sessionCols.includes('web_at')) this.db.exec('ALTER TABLE sessions ADD COLUMN web_at TEXT');
     const modelCols = (this.db.prepare('PRAGMA table_info(models)').all() as Row[]).map((c) => c.name);
@@ -704,6 +794,112 @@ export class Store {
   deleteChat(id: string): boolean {
     this.db.prepare('DELETE FROM chat_turns WHERE chat_id = ?').run(id);
     return this.db.prepare('DELETE FROM chats WHERE id = ?').run(id).changes > 0;
+  }
+
+  // --- Code mode ---------------------------------------------------------------------------------
+
+  listCodeProjects(): CodeProject[] {
+    return (this.db.prepare('SELECT * FROM code_projects ORDER BY name').all() as Row[]).map((r) => ({
+      id: r.id as string,
+      name: r.name as string,
+      path: r.path as string,
+      addedAt: r.added_at as string,
+    }));
+  }
+
+  addCodeProject(p: { id: string; name: string; path: string }): CodeProject {
+    const existing = this.listCodeProjects().find((x) => x.path === p.path);
+    if (existing) return existing;
+    const addedAt = now();
+    this.db.prepare('INSERT INTO code_projects (id, name, path, added_at) VALUES (?, ?, ?, ?)').run(p.id, p.name, p.path, addedAt);
+    return { ...p, addedAt };
+  }
+
+  removeCodeProject(id: string): boolean {
+    this.db.prepare('DELETE FROM code_memory WHERE project_id = ?').run(id);
+    return this.db.prepare('DELETE FROM code_projects WHERE id = ?').run(id).changes > 0;
+  }
+
+  listCodeMemory(projectId: string): CodeMemory[] {
+    return (this.db.prepare('SELECT * FROM code_memory WHERE project_id = ? ORDER BY created_at').all(projectId) as Row[]).map((r) => ({
+      id: r.id as string,
+      projectId: r.project_id as string,
+      text: r.text as string,
+      source: r.source as CodeMemory['source'],
+      sessionId: (r.session_id as string | null) ?? undefined,
+      createdAt: r.created_at as string,
+    }));
+  }
+
+  addCodeMemory(m: Omit<CodeMemory, 'createdAt'>): CodeMemory {
+    const createdAt = now();
+    this.db.prepare('INSERT INTO code_memory (id, project_id, text, source, session_id, created_at) VALUES (?, ?, ?, ?, ?, ?)').run(m.id, m.projectId, m.text, m.source, m.sessionId ?? null, createdAt);
+    return { ...m, createdAt };
+  }
+
+  updateCodeMemory(projectId: string, id: string, text: string): boolean {
+    return this.db.prepare("UPDATE code_memory SET text = ?, source = 'user' WHERE id = ? AND project_id = ?").run(text, id, projectId).changes > 0;
+  }
+
+  deleteCodeMemory(projectId: string, id: string): boolean {
+    return this.db.prepare('DELETE FROM code_memory WHERE id = ? AND project_id = ?').run(id, projectId).changes > 0;
+  }
+
+  createCodeSession(s: Omit<CodeSession, 'status' | 'costUsd' | 'createdAt' | 'updatedAt'>): CodeSession {
+    const at = now();
+    this.db
+      .prepare(
+        `INSERT INTO code_sessions (id, project_id, title, branch, worktree, base_ref, base_commit, in_place, status, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'idle', ?, ?)`,
+      )
+      .run(s.id, s.projectId, s.title, s.branch, s.worktree, s.baseRef, s.baseCommit, s.inPlace ? 1 : 0, at, at);
+    return { ...s, status: 'idle', costUsd: 0, createdAt: at, updatedAt: at };
+  }
+
+  getCodeSession(id: string): CodeSession | undefined {
+    const r = this.db.prepare('SELECT * FROM code_sessions WHERE id = ?').get(id) as Row | undefined;
+    return r ? toCodeSession(r) : undefined;
+  }
+
+  listCodeSessions(): CodeSession[] {
+    return (this.db.prepare('SELECT * FROM code_sessions ORDER BY updated_at DESC LIMIT 200').all() as Row[]).map(toCodeSession);
+  }
+
+  updateCodeSession(id: string, patch: { status?: string; title?: string; addCost?: number }): void {
+    this.db
+      .prepare(
+        `UPDATE code_sessions SET status = COALESCE(?, status), title = COALESCE(?, title), cost_usd = cost_usd + ?, updated_at = ?
+         WHERE id = ?`,
+      )
+      .run(patch.status ?? null, patch.title ?? null, patch.addCost ?? 0, now(), id);
+  }
+
+  getCodeMessages(id: string): unknown[] {
+    const r = this.db.prepare('SELECT messages FROM code_sessions WHERE id = ?').get(id) as Row | undefined;
+    return r ? (JSON.parse(r.messages as string) as unknown[]) : [];
+  }
+
+  setCodeMessages(id: string, messages: unknown[]): void {
+    this.db.prepare('UPDATE code_sessions SET messages = ?, updated_at = ? WHERE id = ?').run(JSON.stringify(messages), now(), id);
+  }
+
+  appendCodeEvent(sessionId: string, type: string, data: unknown): number {
+    const { next } = this.db.prepare('SELECT COALESCE(MAX(seq), 0) + 1 AS next FROM code_events WHERE session_id = ?').get(sessionId) as { next: number };
+    this.db.prepare('INSERT INTO code_events (session_id, seq, type, data, created_at) VALUES (?, ?, ?, ?, ?)').run(sessionId, next, type, JSON.stringify(data), now());
+    return next;
+  }
+
+  codeEvents(sessionId: string, afterSeq = 0): { seq: number; type: string; data: unknown }[] {
+    return (this.db.prepare('SELECT seq, type, data FROM code_events WHERE session_id = ? AND seq > ? ORDER BY seq').all(sessionId, afterSeq) as Row[]).map((r) => ({
+      seq: r.seq as number,
+      type: r.type as string,
+      data: JSON.parse(r.data as string),
+    }));
+  }
+
+  deleteCodeSession(id: string): void {
+    this.db.prepare('DELETE FROM code_events WHERE session_id = ?').run(id);
+    this.db.prepare('DELETE FROM code_sessions WHERE id = ?').run(id);
   }
 
   summary(): Row[] {

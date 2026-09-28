@@ -89,7 +89,7 @@ export type ChatEvent =
   | { event: 'done'; data: Done }
   | { event: 'error'; data: { message: string; status?: number } };
 
-function headers(): Record<string, string> {
+export function headers(): Record<string, string> {
   const h: Record<string, string> = { 'content-type': 'application/json' };
   const key = storage.get('key', '');
   if (key) h.authorization = `Bearer ${key}`;
