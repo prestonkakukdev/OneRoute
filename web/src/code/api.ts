@@ -98,6 +98,7 @@ export const codeApi = {
   addMemory: (projectId: string, text: string) => send('POST', `/projects/${projectId}/memory`, { text }).then((r) => json<CodeMemory>(r)),
   editMemory: (projectId: string, id: string, text: string) => send('PATCH', `/projects/${projectId}/memory/${id}`, { text }).then((r) => json<{ ok: boolean }>(r)),
   deleteMemory: (projectId: string, id: string) => send('DELETE', `/projects/${projectId}/memory/${id}`).then((r) => json<{ ok: boolean }>(r)),
+  resume: (id: string, mode: Mode, permission: Permission) => send('POST', `/sessions/${id}/resume`, { mode, permission }).then((r) => json<{ ok: boolean }>(r)),
   rename: (id: string, title: string) => send('PATCH', `/sessions/${id}`, { title }).then((r) => json<{ ok: boolean }>(r)),
   restore: (id: string, turn: number) => send('POST', `/sessions/${id}/restore`, { turn }).then((r) => json<{ restored: number }>(r)),
   preview: (id: string) => send('POST', `/sessions/${id}/preview`).then((r) => json<{ url?: string; kind: 'dev' | 'static'; process?: ProcessInfo }>(r)),

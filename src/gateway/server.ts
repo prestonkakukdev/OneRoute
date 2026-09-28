@@ -434,6 +434,16 @@ export function createApp(store: Store, router: Router, executor = new Executor(
       return fail(c, err);
     }
   });
+  app.post('/ui/api/code/sessions/:id/resume', async (c) => {
+    const body = runOpts.safeParse(await c.req.json().catch(() => null));
+    if (!body.success) return openAiError(c, 400, 'Expected { mode, permission }');
+    try {
+      harness.resume(c.req.param('id'), body.data);
+      return c.json({ ok: true });
+    } catch (err) {
+      return fail(c, err, 409);
+    }
+  });
   app.post('/ui/api/code/sessions/:id/messages', async (c) => {
     const body = runOpts.extend({ prompt: z.string().min(1) }).safeParse(await c.req.json().catch(() => null));
     if (!body.success) return openAiError(c, 400, 'Expected { prompt }');
