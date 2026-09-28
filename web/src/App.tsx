@@ -5,6 +5,8 @@ import {
   PanelLeftCloseIcon,
   PanelLeftOpenIcon,
   RouteIcon,
+  PanelRightCloseIcon,
+  PanelRightOpenIcon,
   ScanSearchIcon,
   SlidersHorizontalIcon,
   SquarePenIcon,
@@ -14,6 +16,7 @@ import * as React from 'react';
 import { ArcBackdrop } from '@/components/arc-backdrop';
 import { AttachmentTile } from '@/components/attachment-tile';
 import { ChatSidebar } from '@/components/chat-sidebar';
+import { CodeWorkspace } from '@/code/workspace';
 import { Chip } from '@/components/chip';
 import { Inspector } from '@/components/inspector';
 import { AssistantMessage, type Turn, UserMessage } from '@/components/messages';
@@ -72,6 +75,27 @@ function setChatInUrl(id?: string) {
   history.replaceState(null, '', url);
 }
 
+// Chat | Code: which surface the app shows (like ChatGPT's switch to Codex).
+function SurfaceToggle({ value, onChange }: { value: 'chat' | 'code'; onChange: (v: 'chat' | 'code') => void }) {
+  return (
+    <div className="bg-muted/70 ml-1 flex rounded-[12px] p-[3px] shadow-[inset_0_0_0_1px_rgba(123,123,123,0.12)]" role="tablist" aria-label="Mode">
+      {(['chat', 'code'] as const).map((v) => (
+        <button
+          key={v}
+          type="button"
+          role="tab"
+          aria-selected={value === v}
+          onClick={() => onChange(v)}
+          className={cn('relative cursor-pointer rounded-[9px] px-3 py-1 text-[13px] font-medium transition-colors', value === v ? 'text-foreground' : 'text-muted-foreground hover:text-foreground')}
+        >
+          {value === v ? <motion.span layoutId="surface-pill" className="bg-popover absolute inset-0 rounded-[9px] shadow-[inset_0_0_0_1px_rgba(123,123,123,0.16)]" transition={{ type: 'spring', stiffness: 420, damping: 32 }} /> : null}
+          <span className="relative">{v === 'chat' ? 'Chat' : 'Code'}</span>
+        </button>
+      ))}
+    </div>
+  );
+}
+
 // Inspector width follows the window (360-500px); on narrow windows it sits below the chat instead.
 function useInspectorWidth() {
   const calc = () => (window.innerWidth < 1024 ? window.innerWidth : Math.round(Math.min(500, Math.max(360, window.innerWidth * 0.34))));
@@ -84,9 +108,10 @@ function useInspectorWidth() {
   return w;
 }
 
-function PanelToggle({ open, side, onClick }: { open: boolean; side: 'left' | 'right'; onClick: () => void }) {
-  const Icon = side === 'left' ? (open ? PanelLeftCloseIcon : PanelLeftOpenIcon) : ScanSearchIcon;
-  const what = side === 'left' ? 'chats' : 'inspector';
+function PanelToggle({ open, side, surface = 'chat', onClick }: { open: boolean; side: 'left' | 'right'; surface?: 'chat' | 'code'; onClick: () => void }) {
+  // Chat's right panel is the routing inspector; Code's holds changes, terminal, run and details.
+  const Icon = side === 'left' ? (open ? PanelLeftCloseIcon : PanelLeftOpenIcon) : surface === 'code' ? (open ? PanelRightCloseIcon : PanelRightOpenIcon) : ScanSearchIcon;
+  const what = side === 'left' ? (surface === 'code' ? 'projects' : 'chats') : surface === 'code' ? 'changes panel' : 'inspector';
   return (
     <button
       type="button"
@@ -155,6 +180,8 @@ export default function App() {
   const [gatewayKey, setGatewayKey] = React.useState(() => storage.get('key', ''));
   const [prefsOpen, setPrefsOpen] = React.useState(false);
 
+  const [surface, setSurface] = React.useState<'chat' | 'code'>(() => storage.get('surface', 'chat'));
+  React.useEffect(() => storage.set('surface', surface), [surface]);
   const [sidebarOpen, setSidebarOpen] = React.useState(() => storage.get('sidebar', window.innerWidth >= 1100));
   const [inspectorOpen, setInspectorOpen] = React.useState(() => storage.get('inspector', true));
   const inspectorWidth = useInspectorWidth();
@@ -407,10 +434,12 @@ export default function App() {
   return (
     <div className="grid h-full grid-rows-[auto_1fr]">
       <header className="app-header flex items-center gap-2.5 border-b py-2 pr-3 pl-2.5">
-        <PanelToggle side="left" open={sidebarOpen} onClick={() => setSidebarOpen((v) => !v)} />
+        <PanelToggle side="left" surface={surface} open={sidebarOpen} onClick={() => setSidebarOpen((v) => !v)} />
         <h1 className="font-wordmark text-[18px] leading-none font-medium tracking-[-0.03em]">OneRoute</h1>
-        <Chip tone="soft">{userTurns ? `${userTurns} turn${userTurns > 1 ? 's' : ''}` : 'new session'}</Chip>
+        <SurfaceToggle value={surface} onChange={setSurface} />
+        {surface === 'chat' ? <Chip tone="soft">{userTurns ? `${userTurns} turn${userTurns > 1 ? 's' : ''}` : 'new session'}</Chip> : null}
         <div className="flex-1" />
+        {surface === 'chat' ? (
         <button
           type="button"
           onClick={newChat}
@@ -419,9 +448,13 @@ export default function App() {
           <SquarePenIcon className="size-4" aria-hidden />
           New chat
         </button>
-        <PanelToggle side="right" open={inspectorOpen} onClick={() => setInspectorOpen((v) => !v)} />
+        ) : null}
+        <PanelToggle side="right" surface={surface} open={inspectorOpen} onClick={() => setInspectorOpen((v) => !v)} />
       </header>
 
+      {surface === 'code' ? (
+        <CodeWorkspace sidebarOpen={sidebarOpen} panelOpen={inspectorOpen} mode={mode} onModeChange={setMode} onCloseSidebar={() => setSidebarOpen(false)} />
+      ) : (
       <div className="flex min-h-0 max-lg:flex-col">
         <ChatSidebar
           open={sidebarOpen}
@@ -605,6 +638,7 @@ export default function App() {
           ) : null}
         </AnimatePresence>
       </div>
+      )}
 
       <PreferencesDialog
         open={prefsOpen}

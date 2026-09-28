@@ -15,6 +15,8 @@ import type { Router } from '../router/router.js';
 import { MODES, type Mode } from '../taxonomy.js';
 import type { ChatRequest } from '../types.js';
 import { Executor } from './execute.js';
+import { CodeHarness } from '../harness/agent.js';
+import { chooseFolderNative, listFolders } from '../harness/workspace.js';
 import { readSse } from './sse.js';
 import { explainWhy } from '../router/explain.js';
 
@@ -366,6 +368,194 @@ export function createApp(store: Store, router: Router, executor = new Executor(
     if (err instanceof ConfigError) return openAiError(c, 500, err.message, 'configuration_error');
     console.error(err);
     return openAiError(c, 500, err.message, 'server_error');
+  });
+
+  // --- Code mode (the coding harness) ------------------------------------------------------------
+  const harness = new CodeHarness(store, router, executor);
+  const runOpts = z.object({ mode: z.enum(MODES).default('balanced'), permission: z.enum(['auto', 'ask', 'plan']).default('auto') });
+  const fail = (c: Context, err: unknown, status = 400) => openAiError(c, status, (err as Error).message);
+
+  app.get('/ui/api/code/projects', (c) => c.json(store.listCodeProjects()));
+  // Opens Finder's folder chooser on this Mac and returns the chosen path ({ path: null } if cancelled).
+  app.post('/ui/api/code/choose-folder', async (c) => {
+    try {
+      return c.json({ path: await chooseFolderNative() });
+    } catch (err) {
+      return openAiError(c, 501, (err as Error).message);
+    }
+  });
+  // The folder picker: subfolders of ?path= (default: the home folder).
+  app.get('/ui/api/code/browse', (c) => {
+    try {
+      return c.json(listFolders(c.req.query('path') || undefined));
+    } catch (err) {
+      return fail(c, err);
+    }
+  });
+  app.post('/ui/api/code/projects', async (c) => {
+    const body = z.object({ path: z.string().min(1) }).safeParse(await c.req.json().catch(() => null));
+    if (!body.success) return openAiError(c, 400, 'Expected { path }');
+    try {
+      return c.json(await harness.addProject(body.data.path.replace(/^~(?=\/|$)/, process.env.HOME ?? '~')));
+    } catch (err) {
+      return fail(c, err);
+    }
+  });
+  app.delete('/ui/api/code/projects/:id', async (c) => {
+    try {
+      return c.json({ ok: await harness.removeProject(c.req.param('id')) });
+    } catch (err) {
+      return fail(c, err);
+    }
+  });
+
+  // Project memory: what sessions learned about a project, plus notes the user adds. Read at the start of every run.
+  app.get('/ui/api/code/projects/:id/memory', (c) => c.json(store.listCodeMemory(c.req.param('id'))));
+  app.post('/ui/api/code/projects/:id/memory', async (c) => {
+    const body = z.object({ text: z.string().trim().min(1).max(500) }).safeParse(await c.req.json().catch(() => null));
+    if (!body.success) return openAiError(c, 400, 'Expected { text }');
+    if (!store.listCodeProjects().some((p) => p.id === c.req.param('id'))) return openAiError(c, 404, 'Unknown project');
+    return c.json(store.addCodeMemory({ id: `mem_${crypto.randomUUID().slice(0, 8)}`, projectId: c.req.param('id'), text: body.data.text, source: 'user' }));
+  });
+  app.patch('/ui/api/code/projects/:id/memory/:memoryId', async (c) => {
+    const body = z.object({ text: z.string().trim().min(1).max(500) }).safeParse(await c.req.json().catch(() => null));
+    if (!body.success) return openAiError(c, 400, 'Expected { text }');
+    return c.json({ ok: store.updateCodeMemory(c.req.param('id'), c.req.param('memoryId'), body.data.text) });
+  });
+  app.delete('/ui/api/code/projects/:id/memory/:memoryId', (c) => c.json({ ok: store.deleteCodeMemory(c.req.param('id'), c.req.param('memoryId')) }));
+
+  app.get('/ui/api/code/sessions', (c) => c.json(store.listCodeSessions().map((s) => ({ ...s, running: harness.isRunning(s.id) }))));
+  app.post('/ui/api/code/sessions', async (c) => {
+    const body = runOpts.extend({ projectId: z.string(), prompt: z.string().min(1), isolated: z.boolean().default(false) }).safeParse(await c.req.json().catch(() => null));
+    if (!body.success) return openAiError(c, 400, body.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; '));
+    try {
+      return c.json(await harness.startSession(body.data.projectId, body.data.prompt, body.data));
+    } catch (err) {
+      return fail(c, err);
+    }
+  });
+  app.post('/ui/api/code/sessions/:id/messages', async (c) => {
+    const body = runOpts.extend({ prompt: z.string().min(1) }).safeParse(await c.req.json().catch(() => null));
+    if (!body.success) return openAiError(c, 400, 'Expected { prompt }');
+    try {
+      harness.continueSession(c.req.param('id'), body.data.prompt, body.data);
+      return c.json({ ok: true });
+    } catch (err) {
+      return fail(c, err, 409);
+    }
+  });
+  app.post('/ui/api/code/sessions/:id/approvals/:approvalId', async (c) => {
+    const body = z.object({ allow: z.boolean() }).safeParse(await c.req.json().catch(() => null));
+    if (!body.success) return openAiError(c, 400, 'Expected { allow }');
+    return c.json({ ok: harness.approve(c.req.param('id'), c.req.param('approvalId'), body.data.allow) });
+  });
+  app.post('/ui/api/code/sessions/:id/stop', (c) => c.json({ ok: harness.stop(c.req.param('id')) }));
+  app.get('/ui/api/code/sessions/:id/diff', async (c) => {
+    try {
+      return c.json(await harness.diff(c.req.param('id')));
+    } catch (err) {
+      return fail(c, err, 404);
+    }
+  });
+  app.post('/ui/api/code/sessions/:id/undo', (c) => {
+    try {
+      return c.json({ restored: harness.undo(c.req.param('id')) });
+    } catch (err) {
+      return fail(c, err);
+    }
+  });
+  app.patch('/ui/api/code/sessions/:id', async (c) => {
+    const body = z.object({ title: z.string().trim().min(1).max(200) }).safeParse(await c.req.json().catch(() => null));
+    if (!body.success) return openAiError(c, 400, 'Expected { title }');
+    if (!store.getCodeSession(c.req.param('id'))) return openAiError(c, 404, 'Unknown session');
+    store.updateCodeSession(c.req.param('id'), { title: body.data.title });
+    return c.json({ ok: true });
+  });
+  app.post('/ui/api/code/sessions/:id/restore', async (c) => {
+    const body = z.object({ turn: z.number().int().positive() }).safeParse(await c.req.json().catch(() => null));
+    if (!body.success) return openAiError(c, 400, 'Expected { turn }');
+    try {
+      return c.json({ restored: await harness.restoreTo(c.req.param('id'), body.data.turn) });
+    } catch (err) {
+      return fail(c, err);
+    }
+  });
+  app.post('/ui/api/code/sessions/:id/preview', async (c) => {
+    try {
+      return c.json(await harness.preview(c.req.param('id')));
+    } catch (err) {
+      return fail(c, err);
+    }
+  });
+  app.get('/ui/api/code/sessions/:id/processes', (c) => c.json(harness.processes.list(c.req.param('id'))));
+  app.get('/ui/api/code/sessions/:id/processes/:pid/output', (c) => {
+    const out = harness.processes.output(c.req.param('id'), c.req.param('pid'), 32_000);
+    return out === undefined ? openAiError(c, 404, 'Unknown process') : c.text(out);
+  });
+  app.post('/ui/api/code/sessions/:id/processes/:pid/stop', (c) => c.json({ ok: harness.processes.stop(c.req.param('id'), c.req.param('pid')) }));
+  app.delete('/ui/api/code/sessions/:id/processes', (c) => {
+    harness.processes.prune(c.req.param('id'));
+    return c.json({ ok: true });
+  });
+  app.get('/ui/api/code/sessions/:id/screenshots/:name', (c) => {
+    const path = harness.screenshotPath(c.req.param('id'), c.req.param('name'));
+    if (!path) return openAiError(c, 404, 'No such screenshot');
+    return c.body(readFileSync(path), 200, { 'content-type': path.endsWith('.png') ? 'image/png' : 'image/jpeg', 'cache-control': 'private, max-age=86400' });
+  });
+  app.post('/ui/api/code/sessions/:id/save', async (c) => {
+    try {
+      return c.json({ commit: await harness.save(c.req.param('id')) });
+    } catch (err) {
+      return fail(c, err);
+    }
+  });
+  app.delete('/ui/api/code/sessions/:id', async (c) => {
+    try {
+      await harness.discard(c.req.param('id'));
+      return c.json({ ok: true });
+    } catch (err) {
+      return fail(c, err);
+    }
+  });
+  // The session timeline: stored events after ?after=<seq>, then live events (including text deltas).
+  app.get('/ui/api/code/sessions/:id/events', (c) => {
+    const id = c.req.param('id');
+    if (!store.getCodeSession(id)) return openAiError(c, 404, 'Unknown session');
+    const after = Number(c.req.query('after') ?? 0) || 0;
+    return streamSSE(c, async (sse) => {
+      const queue: { seq?: number; type: string; data: unknown }[] = [];
+      let wake: (() => void) | undefined;
+      const unsubscribe = harness.subscribe(id, (e) => {
+        queue.push(e);
+        wake?.();
+      });
+      let lastSeq = after;
+      for (const e of store.codeEvents(id, after)) {
+        await sse.writeSSE({ event: e.type, data: JSON.stringify({ ...e, running: harness.isRunning(id) }), id: String(e.seq) });
+        lastSeq = e.seq;
+      }
+      await sse.writeSSE({ event: 'ready', data: JSON.stringify({ running: harness.isRunning(id) }) });
+      const closed = new Promise<void>((resolve) => c.req.raw.signal.addEventListener('abort', () => resolve(), { once: true }));
+      try {
+        while (!c.req.raw.signal.aborted) {
+          if (!queue.length) {
+            const ping = setTimeout(() => wake?.(), 15000);
+            await Promise.race([new Promise<void>((r) => (wake = r)), closed]);
+            clearTimeout(ping);
+            wake = undefined;
+            if (!queue.length && !c.req.raw.signal.aborted) await sse.writeSSE({ event: 'ping', data: '{}' });
+          }
+          while (queue.length) {
+            const e = queue.shift()!;
+            if (e.seq !== undefined && e.seq <= lastSeq) continue;
+            if (e.seq !== undefined) lastSeq = e.seq;
+            await sse.writeSSE({ event: e.type, data: JSON.stringify(e), ...(e.seq !== undefined ? { id: String(e.seq) } : {}) });
+          }
+        }
+      } finally {
+        unsubscribe();
+      }
+    });
   });
 
   return app;
