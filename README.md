@@ -23,6 +23,8 @@ request ─► Jev (one call, ~0.5s): task type, difficulty, reasoning depth, ou
 
 **What you get**
 - A chat app (web, installable in the macOS Dock) that shows, for every answer, which model and effort were picked and why
+- **OneRoute Code**: a coding agent in the same app that builds, edits, runs and tests projects in folders on your
+  computer, checks its own work (your tests plus a real browser), and routes every run (and every helper) to the right model
 - An OpenAI-compatible API (`model: "auto"`), so existing tools and SDKs can use the router unchanged
 - A CLI for chatting, inspecting decisions and managing the model database
 - ~110 current models with per-effort capability scores, speed and pricing, shipped in `data/catalog.json`
@@ -118,6 +120,47 @@ preference penalties), models ruled out, and the actual cost and time once the a
 large photos are scaled down to 2048px first), PDFs (up to 20 MB) and any text or code file (up to 1 MB, sent inline so
 every model can read it). Attachments stay in the conversation, so follow-up questions can refer to them.
 
+## OneRoute Code
+
+Switch the header toggle from **Chat** to **Code**. Code mode is a coding agent, like Claude Code or Codex, that works
+in folders on your computer, with every run routed by OneRoute.
+
+**Getting started:** click **Open a folder** (on macOS this opens Finder's folder chooser, where you can also create a
+new folder), then describe what to build or change. Any folder works; git is optional. The folder switcher in the
+composer changes folders, and the sidebar lists each project with its sessions underneath (rename or delete them
+like chats).
+
+**How it works**
+- **Modes:** Cheap works in small increments and pauses after each one, so you steer and spend little; Balanced and
+  Best keep going until the task is done and verified.
+- **Permissions** (the + menu): **Auto-edit** (default) edits files and runs ordinary commands freely, but
+  dangerous commands (pushing, deleting outside the folder, `sudo`, reading secrets, …) wait for your approval;
+  **Ask** approves everything; **Plan** only reads and proposes a plan. When approval is needed and the app isn't in
+  view, you get a system notification.
+- **Where it works:** directly in your folder (default). Every message gets a checkpoint: **Restore files to here**
+  on a message puts the files back to how they were before it, and **Undo changes** reverts the whole session.
+  Alternatively, **Separate branch** works in its own git worktree on a new branch that you review and merge yourself.
+- **It checks its own work:** when the agent says it's done, OneRoute runs the project's tests, type check and lint
+  (npm/pnpm/yarn/bun scripts, `node --test`, pytest, cargo, go, `make test`) and, for plain web pages, loads them in
+  headless Chrome and looks for errors. Failures go back to the agent to fix. The agent can also open pages itself,
+  click and type in them, and you see a screenshot. Pass/fail feeds the router's model statistics.
+- **Helpers:** the agent can hand a job to an **explorer** (find things in a large codebase, read long logs) or a
+  **reviewer** (a second model, from a different model family, checks the work for bugs before it finishes). Each runs
+  in its own context and returns only a short report, so the main conversation stays small.
+- **Project memory:** from your corrections and from what fails, OneRoute keeps a few lasting facts per project
+  ("we use pnpm", "user-visible text says Gratuity"), which every run reads. Review, edit or add them in the Memory tab.
+- **Preview:** runs the project's dev server if it has one (otherwise serves the folder) and opens it in a new tab.
+  The **Run** tab lists dev servers and their output.
+- Long sessions are compacted automatically; a run cut off by an error or a restart gets **Retry** / **Resume**.
+
+**Requirements:** Google Chrome for the browser checks (or set `ONEROUTE_BROWSER` to a Chromium executable; without
+one, page checks are skipped). Git only for the separate-branch option.
+
+**Safety and data:** the agent only works in folders you open (never your whole disk or home folder), its commands
+don't see OneRoute's keys or any other secrets in the environment, and nothing leaves your machine except the model
+requests. Sessions live in `router.db`; checkpoints, screenshots and separate-branch copies in `~/.oneroute/`.
+Design notes: [docs/harness.md](docs/harness.md).
+
 ## Use it
 
 ```bash
@@ -173,7 +216,8 @@ and scores them slightly lower. Prompt size is estimated from the actual image d
 | `src/db/` | SQLite capability DB: models, skills per model × task type (× effort once measured), decisions, outcomes, sessions. |
 | `src/router/` | The estimator (success, tokens, cost, latency), the optimizer, escalation, and the explanations. |
 | `src/gateway/` | Executes against OpenRouter with fallbacks, passes streams through, and records usage. Also the HTTP server. |
-| `web/` | The app: React + TypeScript + Tailwind v4 (shadcn layout), built to `web/dist` and served by the router. |
+| `src/harness/` | OneRoute Code: the agent loop, tools, permissions, checkpoints, verification, browser checks, helpers, memory, compaction. |
+| `web/` | The app: React + TypeScript + Tailwind v4 (shadcn layout), built to `web/dist` and served by the router. Code mode is `web/src/code/`. |
 | `scripts/` | `setup.mjs` (first-time setup) and `service.mjs` (the background-service supervisor). |
 | `data/` | `catalog.json` (the shipped model database), vendor benchmark reports, name mappings, and bootstrap priors. |
 
