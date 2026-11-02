@@ -34,7 +34,8 @@ export function parseVariant(m: Pick<AaModel, 'name' | 'slug'>): { base: string;
   const paren = /\(([^)]*)\)/.exec(m.name)?.[1] ?? '';
   const effort = effortFromText(paren);
   const base = effort ? m.slug.replace(EFFORT_SUFFIX, '') : m.slug;
-  const tag = /^\d{4}$/.test(paren.trim()) ? paren.trim() : undefined; // "(0902)" snapshot tag
+  // Snapshot tag: "Qwen3.8 Max (0902)" or "DeepSeek V4 Pro 0813 (Max)".
+  const tag = /^\d{4}$/.test(paren.trim()) ? paren.trim() : /\s(\d{4})(?:\s|$)/.exec(m.name.replace(/\([^)]*\)/g, ''))?.[1];
   return { base, effort, tag };
 }
 

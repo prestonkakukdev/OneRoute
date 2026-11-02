@@ -7,7 +7,7 @@ import { Store } from '../src/db/store.js';
 import { Executor } from '../src/gateway/execute.js';
 import { CodeHarness, retryable, type CodeEvent } from '../src/harness/agent.js';
 import { checkPermission, classifyCommand } from '../src/harness/permissions.js';
-import { insideRoot, toolByName, toolDefinitions } from '../src/harness/tools.js';
+import { htmlToText, insideRoot, toolByName, toolDefinitions } from '../src/harness/tools.js';
 import { discardWorkspace, workspaceDiff } from '../src/harness/workspace.js';
 import { pruneToolResults, summaryCut } from '../src/harness/compact.js';
 import { detectChecks } from '../src/harness/verify.js';
@@ -43,12 +43,14 @@ function turn(opts: { text?: string; calls?: { name: string; args: unknown }[] }
   return new Response(new Blob([body]).stream(), { headers: { 'content-type': 'text/event-stream' } });
 }
 
-function harnessWith(script: Response[]) {
+function harnessWith(script: (Response | ((signal?: AbortSignal) => Response))[]) {
   const store = new Store(':memory:');
   const seen: unknown[] = [];
-  const llm = async (body: unknown) => {
+  // A script entry can be a function of the request's abort signal (for streams that run until stopped).
+  const llm = async (body: unknown, signal?: AbortSignal) => {
     seen.push(body);
-    return script.shift() ?? turn({ text: 'done' });
+    const next = script.shift();
+    return typeof next === 'function' ? (next as (s?: AbortSignal) => Response)(signal) : (next ?? turn({ text: 'done' }));
   };
   // The router's escalation step has its own (unavailable) model, so the script only feeds the agent loop.
   const escalation = async () => new Response('{}', { status: 503 });
@@ -99,9 +101,23 @@ describe('code harness: tools', () => {
     expect(readFileSync(join(root, 'README.md'), 'utf8')).toContain('Hi world');
   });
 
+  it('reads web pages as text and searches through the harness', async () => {
+    expect(htmlToText('<html><head><style>p{}</style><script>x()</script></head><body><h1>Blocks</h1><p>Dirt &amp; stone&#39;s</p><ul><li>one</li></ul></body></html>')).toBe('Blocks\nDirt & stone\'s\n\n- one');
+    const fetchFake = (async (url: string) =>
+      new Response('<title>Doc</title><p>Hello</p>', { headers: { 'content-type': 'text/html' } })) as unknown as typeof fetch;
+    const ctx = { root: tempRepo(), reads: new Map<string, string>(), signal: new AbortController().signal, fetch: fetchFake, search: async (q: string) => `results for ${q}` };
+    const page = await toolByName.get('web_fetch')!.run({ url: 'https://example.com/doc' }, ctx as never);
+    expect(page).toContain('Doc');
+    expect(page).toContain('Hello');
+    expect(await toolByName.get('web_fetch')!.run({ url: 'file:///etc/passwd' }, ctx as never)).toMatch(/only opens http/);
+    expect(await toolByName.get('web_search')!.run({ query: 'minecraft block list' }, ctx as never)).toBe('results for minecraft block list');
+    // Reading the web needs no approval, even in plan mode.
+    expect(checkPermission('plan', toolByName.get('web_fetch')!.toolClass)).toEqual({ allowed: true });
+  });
+
   it('describes every tool to the model as a JSON schema', () => {
     const defs = toolDefinitions();
-    expect(defs.map((d) => d.function.name)).toEqual(['list_files', 'grep', 'read_file', 'edit_file', 'write_file', 'bash', 'process_output', 'stop_process', 'wait', 'check_page', 'subagent', 'todo', 'finish']);
+    expect(defs.map((d) => d.function.name)).toEqual(['list_files', 'grep', 'read_file', 'edit_file', 'write_file', 'bash', 'process_output', 'stop_process', 'wait', 'check_page', 'web_search', 'web_fetch', 'subagent', 'todo', 'finish']);
     expect(defs.find((d) => d.function.name === 'edit_file')!.function.parameters).toMatchObject({ type: 'object', required: ['path', 'old_string', 'new_string'] });
   });
 });
@@ -142,7 +158,7 @@ describe('code harness: agent loop', () => {
     expect(existsSync(join(repo, 'src/greet.ts'))).toBe(false); // the user's checkout is untouched
     expect((await workspaceDiff(session)).files).toEqual([{ path: 'src/greet.ts', added: 1, removed: 0, status: 'added' }]);
     // Tools were offered to the model, and the tool result went back to it.
-    expect((seen[0] as { tools: unknown[] }).tools.length).toBe(13);
+    expect((seen[0] as { tools: unknown[] }).tools.length).toBe(15);
     expect(JSON.stringify(seen[1])).toContain('Wrote src/greet.ts');
     // The timeline is stored for the UI to replay; follow-ups keep the conversation.
     expect(store.codeEvents(session.id).map((e) => e.type)).toContain('tool_result');
@@ -303,6 +319,10 @@ describe('code harness: verification', () => {
       { name: 'Tests', command: 'node --test' },
       { name: 'Browser', page: 'index.html' },
     ]);
+    // A run that built a page in a subfolder is checked there, not at the project's own page.
+    mkdirSync(join(plain, 'minecraft'));
+    writeFileSync(join(plain, 'minecraft', 'index.html'), '<p>game</p>');
+    expect(detectChecks(plain, ['minecraft/index.html', 'notes.md', 'node_modules/x/index.html']).filter((c) => c.page)).toEqual([{ name: 'Browser', page: 'minecraft/index.html' }]);
   });
 
   it('runs the checks when the agent finishes, and sends failures back until they pass', async () => {
@@ -522,5 +542,124 @@ describe('code harness: resume', () => {
     // No follow-up from the user, so nothing to learn: no memory call was made.
     await new Promise((r) => setTimeout(r, 50));
     expect(store.listCodeMemory(project.id)).toEqual([]);
+  });
+});
+
+describe('code harness: turns with nothing to act on', () => {
+  const cutOff = () =>
+    new Response(new Blob([`data: ${JSON.stringify({ choices: [{ delta: { reasoning: 'thinking…' } }] })}\n\ndata: ${JSON.stringify({ choices: [{ delta: {}, finish_reason: 'length' }], usage: { prompt_tokens: 100, completion_tokens: 65536, cost: 0.65 } })}\n\ndata: [DONE]\n\n`]).stream(), {
+      headers: { 'content-type': 'text/event-stream' },
+    });
+
+  it('does not treat a turn cut off while thinking as an answer, and keeps going', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'oneroute-stall-'));
+    created.push(dir);
+    const { harness, seen } = harnessWith([cutOff(), turn({ calls: [{ name: 'write_file', args: { path: 'a.txt', content: 'hi\n' } }] }), turn({ calls: [{ name: 'finish', args: { summary: 'Done' } }] })]);
+    const project = await harness.addProject(dir);
+    const session = await harness.startSession(project.id, 'Build it', { mode: 'balanced', permission: 'auto' });
+    const events = await untilFinished(harness, session.id);
+    expect(events.find((e) => e.type === 'stalled')!.data).toMatchObject({ reason: 'length', tokens: 65536 });
+    expect(events.find((e) => e.type === 'finished')!.data).toMatchObject({ reason: 'finish' });
+    // The next request tells the model what happened and doesn't carry the wasted turn.
+    const next = JSON.stringify(seen[1]);
+    expect(next).toContain('ran out of output tokens while you were still thinking');
+    // Low effort for the step after the stall only; normal effort again once the model has acted.
+    const efforts = seen.map((b) => (b as { reasoning?: { effort?: string } }).reasoning?.effort);
+    expect(efforts[1]).toBe('low');
+    expect(efforts[2]).toBe(efforts[0]);
+    expect(readFileSync(join(dir, 'a.txt'), 'utf8')).toBe('hi\n');
+  });
+
+  it('gives up with an error, not "answered", when it keeps happening', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'oneroute-stall-'));
+    created.push(dir);
+    const { harness } = harnessWith([cutOff(), cutOff(), cutOff()]);
+    const project = await harness.addProject(dir);
+    const session = await harness.startSession(project.id, 'Build it', { mode: 'balanced', permission: 'auto' });
+    const events = await untilFinished(harness, session.id);
+    expect(events.find((e) => e.type === 'finished')!.data).toMatchObject({ reason: 'error', summary: expect.stringContaining('output allowance') });
+  });
+});
+
+describe('code harness: per-step budgets', () => {
+  it('caps agent-step effort per mode and bounds each step’s output', async () => {
+    const { capEffort, lowerEffort, stepMaxTokens } = await import('../src/harness/budget.js');
+    const offered = ['low', 'medium', 'high', 'xhigh', 'max'] as const;
+    expect(capEffort('xhigh', [...offered], 'high')).toBe('high');
+    expect(capEffort('max', ['low', 'max'], 'high')).toBe('low'); // highest offered at or below the cap
+    expect(capEffort('medium', [...offered], 'high')).toBe('medium'); // already below: unchanged
+    expect(capEffort('default', [], 'medium')).toBe('default'); // models without effort levels
+    expect(lowerEffort('high', [...offered])).toBe('medium');
+    expect(stepMaxTokens('balanced', 65_536)).toBe(32_000);
+    expect(stepMaxTokens('cheap', 8_192)).toBe(8_192); // never above the model's own limit
+  });
+
+  it('sends the capped effort and an output cap with every step', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'oneroute-budget-'));
+    created.push(dir);
+    const { harness, seen } = harnessWith([turn({ calls: [{ name: 'finish', args: { summary: 'Done' } }] })]);
+    const project = await harness.addProject(dir);
+    const session = await harness.startSession(project.id, 'Prove the Riemann hypothesis, then build an OS', { mode: 'balanced', permission: 'auto' });
+    await untilFinished(harness, session.id);
+    const body = seen[0] as { max_tokens?: number; reasoning?: { effort?: string } };
+    expect(body.max_tokens).toBeLessThanOrEqual(32_000);
+    expect(['none', 'minimal', 'low', 'medium', 'high', undefined]).toContain(body.reasoning?.effort);
+  });
+});
+
+// A stream that thinks forever (a chunk every 50 ms) until its request is aborted, like a real provider.
+function endlessThinking(signal?: AbortSignal): Response {
+  const enc = new TextEncoder();
+  let timer: ReturnType<typeof setInterval>;
+  const stream = new ReadableStream<Uint8Array>({
+    start(controller) {
+      timer = setInterval(() => controller.enqueue(enc.encode(`data: ${JSON.stringify({ choices: [{ delta: { reasoning: 'hmm ' } }] })}\n\n`)), 50);
+      signal?.addEventListener('abort', () => {
+        clearInterval(timer);
+        controller.error(new DOMException('This operation was aborted', 'AbortError'));
+      });
+    },
+    cancel() {
+      clearInterval(timer);
+    },
+  });
+  return new Response(stream, { headers: { 'content-type': 'text/event-stream' } });
+}
+
+describe('code harness: thinking watchdog', () => {
+  it('stops a stream that thinks past its allowance, by time, even when little text arrives', async () => {
+    const { readTurn } = await import('../src/harness/agent.js');
+    const ac = new AbortController();
+    const started = Date.now();
+    const out = await readTurn(endlessThinking(ac.signal).body!, () => {}, () => {}, { limitTokens: 100, tokensPerSecond: 200, stop: () => ac.abort() });
+    // 100 tokens at 200 per second: stopped after about half a second.
+    expect(Date.now() - started).toBeLessThan(3000);
+    expect(ac.signal.aborted).toBe(true);
+    expect(out.truncated).toBe(true);
+    expect(out.overthoughtTokens).toBeGreaterThanOrEqual(100);
+  });
+
+  it('Stop ends a run while the model is still streaming', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'oneroute-stop-'));
+    created.push(dir);
+    const { harness } = harnessWith([(signal) => endlessThinking(signal)]);
+    const project = await harness.addProject(dir);
+    const session = await harness.startSession(project.id, 'Build it', { mode: 'balanced', permission: 'auto' });
+    const done = untilFinished(harness, session.id);
+    await new Promise((r) => setTimeout(r, 400)); // streaming by now
+    harness.stop(session.id);
+    const events = await done;
+    expect(events.find((e) => e.type === 'finished')!.data).toMatchObject({ reason: 'stopped' });
+    expect(harness.isRunning(session.id)).toBe(false);
+  });
+
+  it('caps effort only where a runaway step would be expensive', async () => {
+    const { capDecision } = await import('../src/harness/budget.js');
+    const d = { effort: 'max' } as never;
+    const offered = ['low', 'medium', 'high', 'xhigh', 'max'] as never;
+    // $10 per million output tokens: a 32K step could cost $0.32, so the effort is capped.
+    expect((capDecision(d, offered, 'balanced', 10e-6, 65_536) as { effort: string }).effort).toBe('high');
+    // $0.50 per million: at most $0.016, so the router's choice stands.
+    expect((capDecision(d, offered, 'balanced', 0.5e-6, 65_536) as { effort: string }).effort).toBe('max');
   });
 });

@@ -166,20 +166,22 @@ export type Dimension = Capability;
 // Missing benchmarks are imputed from the variant's Intelligence Index; trust records real coverage.
 export const DIMENSION_BENCHMARKS: Record<Capability, Record<string, number>> = {
   code_generation: { artificial_analysis_coding_index: 2, scicode: 1, livecodebench: 1, frontiercode_main: 1, frontiercode_extended: 0.5, lmarena_coding: 1 },
-  code_debugging: { terminalbench_hard: 1.5, terminalbench_v2_1: 1.5, terminalbench_4: 1.5, deepswe_1_1: 1, cursorbench_4: 1, artificial_analysis_coding_index: 0.5 },
-  software_engineering: { deepswe_1_1: 2, terminalbench_4: 1.5, cursorbench_4: 1, frontiercode_extended: 1, terminalbench_hard: 1, lcr: 0.5 },
+  code_debugging: { terminalbench_hard: 1.5, terminalbench_v2_1: 1.5, terminalbench_v4_0: 1.5, terminalbench_4: 1.5, deepswe_1_1: 1, cursorbench_4: 1, artificial_analysis_coding_index: 0.5 },
+  software_engineering: { deepswe_1_1: 2, terminalbench_v4_0: 1.5, terminalbench_4: 1.5, cursorbench_4: 1, frontiercode_extended: 1, terminalbench_hard: 1, lcr: 0.5 },
   math: { artificial_analysis_math_index: 2, aime_25: 1, aime: 1, math_500: 0.5, frontiermath_t4: 1, lmarena_math: 1, hle: 0.5 },
-  reasoning: { gpqa: 1, hle: 1, gpqa_diamond: 0.5, hle_verified: 0.5, hle_tools: 0.5, arc_agi_2: 0.5, mmlu_pro: 0.5, lmarena_hard_prompts: 1 },
+  reasoning: { gpqa: 1, hle: 1, gpqa_diamond: 0.5, hle_verified: 0.5, hle_tools: 0.5, arc_agi_2: 0.5, mmlu_pro: 0.5, lmarena_hard_prompts: 1, aa_omniscience_index: 0.5 },
   long_context: { lcr: 2, mrcr_8needle_256k_512k: 1, mrcr_8needle_512k_1m: 1 },
-  agentic_tool_use: { tau2: 1.5, tau_banking: 1, automationbench: 1, agents_last_exam: 1, terminalbench_hard: 0.5 },
-  computer_use: { osworld_2: 2, screenspot_pro: 1, agents_last_exam: 0.5 },
+  agentic_tool_use: { tau2: 1.5, tau_banking: 1, automationbench: 1, agents_last_exam: 1, terminalbench_hard: 0.5, aa_briefcase_elo: 0.5 },
+  computer_use: { osworld_2: 2, osworld_2_1: 2, screenspot_pro: 1, agents_last_exam: 0.5 },
   web_research: { browsecomp: 2, hle_tools: 0.5 },
-  vision: { mmmu_pro: 1, charxiv_reasoning: 1, chartography: 1, screenspot_pro: 0.5, lvbench: 0.5 },
+  vision: { mmmu_pro: 1, charxiv_reasoning: 1, chartography: 1, chartography_no_tools: 1, screenspot_pro: 0.5, lvbench: 0.5 },
   instruction_following: { ifbench: 2, lmarena_instruction_following: 1 },
   writing: { lmarena_creative_writing: 2, gdpval_aa_v2_1_elo: 0.5, gdpval_aa_v2_elo: 0.5, ifbench: 0.3 },
   conversation: { lmarena_text: 2, lmarena_hard_prompts: 0.5, ifbench: 0.3 },
-  knowledge_work: { gdpval_aa_v2_1_elo: 1, gdpval_aa_v2_elo: 1, vals_finance_agent_2: 0.5, harvey_legal_agent: 0.5, healthbench_pro: 0.5, automationbench: 0.5 },
-  document_understanding: { gdp_pdf: 1.5, lcr: 0.5, charxiv_reasoning: 0.5, ifbench: 0.3 },
+  // AA-Briefcase: long-horizon knowledge work as an agent (documents, slides, spreadsheets). AA-Omniscience: knowledge
+  // accuracy that penalises confident wrong answers, the closest measure of hallucination we have.
+  knowledge_work: { gdpval_aa_v2_1_elo: 1, gdpval_aa_v2_elo: 1, aa_briefcase_elo: 1, vals_finance_agent_2: 0.5, harvey_legal_agent: 0.5, healthbench_pro: 0.5, automationbench: 0.5, aa_omniscience_index: 0.5 },
+  document_understanding: { gdp_pdf: 1.5, lcr: 0.5, charxiv_reasoning: 0.5, aa_briefcase_elo: 0.5, ifbench: 0.3 },
   science: { terminalbench_science: 1.5, scicode: 1, gpqa: 0.5, healthbench_pro: 0.5 },
 };
 

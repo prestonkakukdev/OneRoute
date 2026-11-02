@@ -14,6 +14,19 @@
   - Project memory learned from corrections and failures, editable in the app.
   - Preview (dev server or static server), background processes, context compaction, retries when a model's
     connection drops, and Resume / Retry for runs stopped by a restart or an error.
+  - Web research: `web_search` (cited sources) and `web_fetch` tools, also for the explorer helper.
+  - Cost safety: per-step output caps, effort caps for expensive models, and a time-based thinking watchdog; a step
+    that only thinks is stopped and retried at low effort instead of being shown as "answered". Stop works
+    mid-stream, and the service no longer restarts while a run is active.
+  - Verification opens the pages a run changed, not just the project's root `index.html`.
+- Models: GPT-6.1 Sol and Terra, Claude Haiku 5.5, Gemini 4 Argon, Kimi K3.1 Pro, Muse Wonder, DeepSeek V4.1 Flash
+  1017, DeepSeek V4 Pro 0813, Mistral Large 4, Step 5 Preview, Beam 1.0 and others (122 enabled models). Vendor
+  results from the GPT-6.1 Terra and Sol pages (every effort level), the Claude Haiku 5.5 and Sonnet 5.5 pages, and
+  AA-Briefcase / AA-Omniscience.
+- Artificial Analysis Intelligence Index v5: the capability scale stays on the v4 series (`data/aa-index-v4.json`);
+  v5 is an ordinary benchmark and models AA has not scored on v4 get an estimate from v5 and their other benchmarks
+  (mean error 2.1 points, leave-one-out). Without this, an ingest would have dropped from 115 models to 33.
+- Ingest keeps a source's last download when it fails (LMArena now blocks automated requests).
 - Renamed the project to OneRoute (earlier: Model Router, then System1 Route): the CLI is now `oneroute`,
   the macOS service `com.oneroute.service` (installing replaces older agents), logs in `~/Library/Logs/OneRoute/`.
 

@@ -9,7 +9,8 @@
 // otherwise restart it).
 
 import { spawn } from 'node:child_process';
-import { existsSync, statSync, truncateSync, watch } from 'node:fs';
+import { existsSync, readFileSync, statSync, truncateSync, watch } from 'node:fs';
+import { homedir } from 'node:os';
 import { dirname, join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -70,6 +71,7 @@ function supervise(name, args, keep = () => true) {
 
   return {
     start,
+    pid: () => child?.pid,
     // Restart now (after a code change): kill the current process; the exit handler brings it back.
     restart(reason) {
       log(name, `restarting: ${reason}`);
@@ -94,17 +96,39 @@ const webBuild = supervise(
   (line) => !/^\s*web\/dist\/|^\s*(transforming|rendering chunks|computing gzip|✓ \d+ modules transformed)/i.test(line),
 );
 
+// Code runs in progress, as the router records them. A restart would cut them off, so it waits for them
+// (up to 30 minutes).
+const ACTIVE_RUNS_FILE = process.env.ONEROUTE_ACTIVE_RUNS_FILE ?? join(homedir(), '.oneroute', 'active-runs.json');
+const MAX_WAIT_MS = 30 * 60_000;
+function activeRuns() {
+  try {
+    const a = JSON.parse(readFileSync(ACTIVE_RUNS_FILE, 'utf8'));
+    return a.pid === router.pid() ? (a.runs?.length ?? 0) : 0; // written by an earlier router process: stale
+  } catch {
+    return 0;
+  }
+}
+
 // Restart the router when its code, data files or keys change (debounced: a `git pull` touches many files).
 let pending;
+let waitingSince;
 const changed = new Set();
+function restartWhenIdle() {
+  const runs = activeRuns();
+  if (runs && Date.now() - (waitingSince ??= Date.now()) < MAX_WAIT_MS) {
+    if (Date.now() - waitingSince < 1000) log('router', `files changed; waiting for ${runs} code run${runs === 1 ? '' : 's'} to finish before restarting`);
+    pending = setTimeout(restartWhenIdle, 5000);
+    return;
+  }
+  waitingSince = undefined;
+  const files = [...changed].slice(0, 3).join(', ') + (changed.size > 3 ? ` and ${changed.size - 3} more` : '');
+  changed.clear();
+  router.restart(`changed ${files}`);
+}
 function onChange(file) {
   changed.add(file);
   clearTimeout(pending);
-  pending = setTimeout(() => {
-    const files = [...changed].slice(0, 3).join(', ') + (changed.size > 3 ? ` and ${changed.size - 3} more` : '');
-    changed.clear();
-    router.restart(`changed ${files}`);
-  }, 400);
+  pending = setTimeout(restartWhenIdle, 400);
 }
 for (const dir of ['src', 'data']) {
   const path = join(ROOT, dir);

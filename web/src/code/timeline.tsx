@@ -9,6 +9,7 @@ import {
   FileSearchIcon,
   FileTextIcon,
   FolderTreeIcon,
+  GlobeIcon,
   GitBranchIcon,
   AppWindowIcon,
   ArchiveIcon,
@@ -65,6 +66,10 @@ function describe(name: string, input: Input): { icon: React.ReactNode; title: R
       };
     case 'check_page':
       return { icon: <AppWindowIcon />, title: <>Checked <code>{String(input.target ?? '')}</code> in a browser</> };
+    case 'web_search':
+      return { icon: <GlobeIcon />, title: <>Searched the web for <q>{String(input.query ?? '')}</q></> };
+    case 'web_fetch':
+      return { icon: <GlobeIcon />, title: <>Read <code className="truncate">{String(input.url ?? '')}</code></> };
     case 'process_output':
       return { icon: <TerminalIcon />, title: <>Read the output of {String(input.id ?? '')}</> };
     case 'stop_process':
@@ -79,7 +84,7 @@ export interface ToolItem {
   id: string;
   name: string;
   input: Input;
-  result?: { ok: boolean; output: string; meta?: { screenshot?: string; problems?: number; url?: string } };
+  result?: { ok: boolean; output: string; meta?: { screenshot?: string; problems?: number; url?: string; costUsd?: number } };
 }
 export interface CheckRow {
   name: string;
@@ -132,6 +137,7 @@ export type TimelineItem =
   | { kind: 'compacted'; how: string; detail: number }
   | { kind: 'step'; costUsd: number }
   | { kind: 'retry'; message: string; attempt: number; of: number; switchedTo?: string }
+  | { kind: 'stalled'; reason: string; tokens?: number; effort?: string }
   | { kind: 'finished'; reason: string; summary?: string; verified?: string; next_steps?: string; checks?: string };
 
 // Folds the event stream into timeline items (tool results attach to their calls, approvals resolve in place).
@@ -154,6 +160,10 @@ export function buildTimeline(events: CodeEvent[]): TimelineItem[] {
       helper.steps += 1;
       helper.costUsd += Number(d.costUsd ?? 0);
       items.push({ kind: 'step', costUsd: Number(d.costUsd ?? 0) });
+      continue;
+    }
+    if (type === 'stalled') {
+      if (!helper) items.push({ kind: 'stalled', reason: String(d.reason), tokens: d.tokens as number | undefined, effort: d.effort as string | undefined });
       continue;
     }
     if (type === 'retry') {
@@ -467,9 +477,10 @@ function workSummary(work: TimelineItem[]): string {
     count(['bash']) ? `ran ${count(['bash'])} command${count(['bash']) === 1 ? '' : 's'}` : '',
     count(['check_page']) ? `${count(['check_page'])} page check${count(['check_page']) === 1 ? '' : 's'}` : '',
     count(['grep', 'list_files']) ? `${count(['grep', 'list_files'])} search${count(['grep', 'list_files']) === 1 ? '' : 'es'}` : '',
+    count(['web_search', 'web_fetch']) ? `${count(['web_search', 'web_fetch'])} web lookup${count(['web_search', 'web_fetch']) === 1 ? '' : 's'}` : '',
     work.some((w) => w.kind === 'helper') ? `${work.filter((w) => w.kind === 'helper').length} helper${work.filter((w) => w.kind === 'helper').length === 1 ? '' : 's'}` : '',
   ].filter(Boolean);
-  const cost = work.reduce((n, w) => n + (w.kind === 'step' ? w.costUsd : 0), 0);
+  const cost = work.reduce((n, w) => n + (w.kind === 'step' ? w.costUsd : w.kind === 'tool' ? (w.result?.meta?.costUsd ?? 0) : 0), 0);
   const steps = work.filter((w) => w.kind === 'step').length;
   return [`${steps} step${steps === 1 ? '' : 's'}`, ...parts, cost ? (cost < 0.01 ? `$${cost.toFixed(4)}` : `$${cost.toFixed(2)}`) : ''].filter(Boolean).join(' · ');
 }
@@ -621,6 +632,19 @@ export function Timeline({
               <span>
                 The connection to the model dropped ({it.message}).{' '}
                 {it.switchedTo ? `Switched to ${it.switchedTo.split('/')[1] ?? it.switchedTo} and trying again.` : `Trying again (${it.attempt} of ${it.of}).`}
+              </span>
+            </motion.div>
+          );
+        case 'stalled':
+          return (
+            <motion.div key={key} {...enter} className="text-warn/90 flex items-start gap-2 text-[12.5px]">
+              <RotateCcwIcon className="mt-0.5 size-3.5 shrink-0" aria-hidden />
+              <span>
+                {it.reason === 'thinking'
+                  ? `Stopped the model after it thought for about ${it.tokens ? `${Math.round(it.tokens / 1000)}K tokens` : 'too long'} without acting, to save cost. Told it to plan briefly and build in smaller steps${it.effort ? `, now at ${it.effort} effort` : ''}.`
+                  : it.reason === 'length'
+                    ? `The model used its whole output allowance${it.tokens ? ` (${it.tokens.toLocaleString()} tokens)` : ''} thinking before it acted. Told it to start writing in smaller steps${it.effort ? `, now at ${it.effort} effort` : ''}.`
+                    : 'The model ended its turn without doing anything. Told it to carry on.'}
               </span>
             </motion.div>
           );

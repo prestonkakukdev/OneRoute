@@ -13,6 +13,7 @@ import { CALIBRATION_PRIOR, Store } from '../db/store.js';
 import { rebuildCalibration } from '../learning/calibration.js';
 import { syncFromOpenRouter } from '../db/sync.js';
 import { fetchAaModels, type AaModel } from '../ingest/aa.js';
+import { loadLegacyIndex } from '../ingest/anchor.js';
 import { arenaResults, fetchArenaCategory, LMARENA_CATEGORIES } from '../ingest/lmarena.js';
 import { runPipeline } from '../ingest/pipeline.js';
 import { fetchProviderStats } from '../ingest/providerStats.js';
@@ -297,12 +298,20 @@ program
     const skip = new Set(opts.skip ?? []);
     const cacheDir = new URL('../../data/cache/', import.meta.url);
     mkdirSync(cacheDir, { recursive: true });
+    // A source that fails falls back to its last download (with a warning) rather than dropping out of the DB.
     const cached = async <T>(name: string, fetcher: () => Promise<T>): Promise<{ data: T; fetchedAt: string }> => {
       const file = new URL(name, cacheDir);
       if (opts.cache && existsSync(file)) return JSON.parse(readFileSync(file, 'utf8'));
-      const out = { data: await fetcher(), fetchedAt: new Date().toISOString() };
-      writeFileSync(file, JSON.stringify(out));
-      return out;
+      try {
+        const out = { data: await fetcher(), fetchedAt: new Date().toISOString() };
+        writeFileSync(file, JSON.stringify(out));
+        return out;
+      } catch (err) {
+        if (!existsSync(file)) throw err;
+        const stale = JSON.parse(readFileSync(file, 'utf8')) as { data: T; fetchedAt: string };
+        console.log(red(`  ${name}: ${(err as Error).message}; using the copy from ${stale.fetchedAt.slice(0, 10)}`));
+        return stale;
+      }
     };
 
     const aa = await cached('aa-free.json', () => fetchAaModels());
@@ -324,9 +333,10 @@ program
     }
 
     const store = new Store(config.dbPath);
-    const report = runPipeline(store, { aa: aa.data, or: or.data, external, fetchedAt: aa.fetchedAt, minRelease: opts.since });
+    const report = runPipeline(store, { aa: aa.data, or: or.data, external, fetchedAt: aa.fetchedAt, minRelease: opts.since, legacyIndex: loadLegacyIndex() });
     console.log(`Capability DB: ${report.models.length} models from ${report.aaVariants} Artificial Analysis variants + ${report.externalRows} LMArena/vendor results`);
     console.log(`  ${report.measuredVariants} model x effort variants measured, ${report.filledVariants} filled from the measured effort curve; ${report.benchmarksEquated} benchmarks on the common scale`);
+    if (report.estimatedIndex) console.log(dim(`  ${report.estimatedIndex} variants have no v4 Intelligence Index: estimated from Index v5 and their other benchmarks`));
     if (report.externalUnmatched) console.log(dim(`  ${report.externalUnmatched} external results skipped (model not tracked or effort not offered)`));
     if (report.disabled.length) console.log(`  disabled (no independent anchor): ${report.disabled.join(', ')}`);
 

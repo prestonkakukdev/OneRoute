@@ -7,6 +7,7 @@ import { ModelResolver } from '../src/ingest/resolve.js';
 import { loadVendorResults } from '../src/ingest/vendor.js';
 import { ANCHOR, deriveDimensions, equate, fillEffort, fitEffortEffects, fitEquating } from '../src/ingest/derive.js';
 import { dataHash, generateProfiles } from '../src/ingest/profiles.js';
+import { INDEX_V5, onLegacyScale } from '../src/ingest/anchor.js';
 import type { OpenRouterModel } from '../src/providers/openrouter.js';
 
 const orModel = (id: string, efforts: string[], mandatory = true): OpenRouterModel => ({
@@ -39,6 +40,7 @@ describe('parseVariant', () => {
     expect(parseVariant({ name: 'GPT-6 Sol (max)', slug: 'gpt-6-sol' })).toMatchObject({ base: 'gpt-6-sol', effort: 'max' });
     // "Max" in a model name is not an effort level.
     expect(parseVariant({ name: 'Qwen3.8 Max (0902)', slug: 'qwen3-8-max' })).toEqual({ base: 'qwen3-8-max', effort: undefined, tag: '0902' });
+    expect(parseVariant({ name: 'DeepSeek V4 Pro 0813 (Non-reasoning)', slug: 'deepseek-v4-pro-non-reasoning' })).toEqual({ base: 'deepseek-v4-pro', effort: 'none', tag: '0813' });
   });
 });
 
@@ -170,6 +172,30 @@ describe('runPipeline', () => {
   });
 });
 
+describe('index versions', () => {
+  // The API field now carries Index v5; the anchor stays on the v4 series.
+  const population = Array.from({ length: 20 }, (_, i) => {
+    const v4 = 15 + i * 2;
+    return aaVariant(`m${i}`, `M${i}`, v4 * 1.3 - 12, { hle: v4 / 100, scicode: v4 / 80 });
+  });
+  const legacy = Object.fromEntries(population.map((v, i) => [v.slug, { [ANCHOR]: 15 + i * 2 }]));
+
+  it('keeps published v4 values and moves the API index to v5', () => {
+    const { aa, estimated } = onLegacyScale(population, legacy);
+    expect(aa[3]!.evaluations).toMatchObject({ [ANCHOR]: 21, [INDEX_V5]: 21 * 1.3 - 12 });
+    expect(estimated.size).toBe(0);
+  });
+
+  it('estimates v4 for new variants from v5 and their benchmarks, and skips variants with too little data', () => {
+    const fresh = aaVariant('new', 'New', 40 * 1.3 - 12, { hle: 0.4, scicode: 0.5 });
+    const thin = { ...aaVariant('thin', 'Thin', 0, { hle: 0.3 }), evaluations: { hle: 0.3 } };
+    const { aa, estimated } = onLegacyScale([...population, fresh, thin], legacy);
+    expect(aa.find((v) => v.slug === 'new')!.evaluations![ANCHOR]).toBeCloseTo(40, 0);
+    expect(estimated).toEqual(new Set(['new']));
+    expect(aa.find((v) => v.slug === 'thin')!.evaluations![ANCHOR]).toBeUndefined();
+  });
+});
+
 describe('sources', () => {
   it('parses LMArena names and embedded ratings', () => {
     expect(parseArenaName('claude-opus-5-high')).toEqual({ base: 'claude-opus-5', effort: 'high' });
@@ -187,7 +213,9 @@ describe('sources', () => {
 
   it('loads every vendor report row with its source and effort', () => {
     const rows = loadVendorResults();
-    expect(rows.every((r) => !r.independent && r.source.startsWith('vendor:') && r.sourceRef)).toBe(true);
+    // Vendor pages are not independent; third-party measurements (Artificial Analysis) are, and keep their own source.
+    expect(rows.every((r) => r.sourceRef && (r.independent ? !r.source.startsWith('vendor:') : r.source.startsWith('vendor:')))).toBe(true);
+    expect(rows.find((r) => r.orId === 'anthropic/claude-opus-5.5' && r.benchmark === 'aa_briefcase_elo' && r.independent)).toMatchObject({ effort: 'max', value: 1822 });
     expect(rows.find((r) => r.orId === 'anthropic/claude-opus-5.5' && r.benchmark === 'terminalbench_4')).toMatchObject({ effort: 'xhigh', value: 66.4 });
     expect(rows.find((r) => r.orId === 'openai/gpt-6-sol' && r.benchmark === 'osworld_2')).toMatchObject({ effort: 'xhigh', value: 60.5 });
   });

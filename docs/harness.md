@@ -58,6 +58,13 @@ Web app (Code mode) ──SSE/POST──► Harness session ──► Orchestrat
 Budgets: max steps and max cost per run (warn at 80 %, stop at 100 %); the same failing call repeated three times
 counts as a loop and escalates or stops.
 
+Per-step limits (`src/harness/budget.ts`): an output cap on every step (16K / 32K / 48K tokens by mode), an effort cap
+for models whose runaway step would cost more than $0.05, and a thinking allowance (8K / 16K / 24K). Providers may
+ignore thinking budgets and stream only a summary of long thinking, so OneRoute measures thinking by time × the
+model's learned tokens per second and stops a step that thinks past its allowance without acting. A stopped or
+cut-off step is never treated as the answer: the model is told what happened, the next step runs at low effort, and
+the normal effort returns as soon as it acts; after repeated stalls the run ends with a Retry button.
+
 ### Tools
 
 Each tool is one module: **name, description, Zod input schema, permission class, execute**. Permission classes:
@@ -73,10 +80,12 @@ Each tool is one module: **name, description, Zod input schema, permission class
 | `bash` | exec | cwd = worktree, timeout, output cap; classified per command (below) |
 | `bash` (`background: true`) | exec | dev servers and watchers: returns once a local URL is printed; `process_output`, `stop_process` |
 | `check_page` | exec | opens an HTML file (from disk, as the user would) or a localhost URL in headless Chrome; reports console errors, exceptions, failed requests, visible text; optional click/fill/press/select steps and element reads; screenshot for the UI |
+| `web_search` | read | a cheap routed model with OpenRouter's web plugin answers the query with cited sources (~$0.02 a search, billed to the session); outside the agent's conversation, so its model and cache are untouched |
+| `web_fetch` | read | GET an http(s) URL, HTML converted to text, 20K characters max |
 | `todo` | — | the agent's visible task list |
 | `finish` | — | summary of what changed and how it was verified |
 
-Later: `web_fetch` (network), LSP (diagnostics, go-to-definition, references), MCP servers, sub-agent tools, and a
+Later: LSP (diagnostics, go-to-definition, references), MCP servers, sub-agent tools, and a
 tool-search tool once there are enough tools that sending every schema costs real tokens.
 
 ### Permissions
@@ -133,8 +142,8 @@ model and effort that produced them.
 
 When the agent calls `finish` after changing things, OneRoute runs the project's checks itself (`src/harness/verify.ts`):
 type check, lint and tests from package.json scripts (npm/pnpm/yarn/bun), `node --test` for `*.test.js`, pytest,
-cargo, go, `make test`, and — for a plain web page with no dev server — a headless-browser load of `index.html` from
-disk. Failures go back to the agent as the result of its `finish` call ("Not finished: …") up to 1/2/3 times
+cargo, go, `make test`, and — for a plain web page with no dev server — a headless-browser load from disk of the
+HTML pages the run changed (up to three; `index.html` when none changed). Failures go back to the agent as the result of its `finish` call ("Not finished: …") up to 1/2/3 times
 (Cheap/Balanced/Best); after that the run ends with the failures stated. The result is recorded as implicit
 feedback on the run's routing decision, so passing or failing checks feed the router's per-model success rates.
 
