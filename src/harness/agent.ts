@@ -9,7 +9,7 @@
 // conversations are compacted.
 
 import { randomUUID } from 'node:crypto';
-import { existsSync, readFileSync, rmSync, statSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { basename, join } from 'node:path';
 import type { CodeProject, CodeSession, Store } from '../db/store.js';
@@ -19,6 +19,7 @@ import type { Router } from '../router/router.js';
 import type { Mode } from '../taxonomy.js';
 import type { ChatMessage, RouteDecision } from '../types.js';
 import { explainWhy } from '../router/explain.js';
+import { capDecision, lowerEffort, STEP_MAX_TOKENS as STEP_MAX_TOKENS_FOR_PROMPT, STEP_THINK_TOKENS, stepMaxTokens } from './budget.js';
 import { Checkpoints } from './checkpoints.js';
 import { compactionLimits, pruneToolResults, SUMMARY_PROMPT, summaryCut, summaryMessage, transcript } from './compact.js';
 import { checkPermission, type PermissionMode } from './permissions.js';
@@ -30,6 +31,9 @@ import { type Check, type CheckResult, detectChecks, packageManager, readJson, r
 import { checkProjectFolder, createWorkspace, discardWorkspace, git, isGitRepo, listProjectFiles, repoRoot, saveToBranch, workspaceDiff } from './workspace.js';
 
 export const SCREENSHOTS_DIR = join(homedir(), '.oneroute', 'screenshots');
+// Which Code runs are in progress. The background service reads it and holds off restarting OneRoute after a
+// file change until they finish (a restart would cut them off).
+export const ACTIVE_RUNS_FILE = process.env.ONEROUTE_ACTIVE_RUNS_FILE ?? join(homedir(), '.oneroute', 'active-runs.json');
 
 export interface RunOptions {
   mode: Mode;
@@ -63,6 +67,11 @@ const LOOP_REPEATS = 3;
 // Automatic checks that fail send the agent back to fix them this many times before the run ends anyway.
 const CHECK_RETRIES: Record<Mode, number> = { cheap: 1, balanced: 2, best: 3 };
 
+// Tool calls failing back to back this many times means the agent is stuck (different calls, same wall).
+const MAX_FAILED_IN_A_ROW = 8;
+
+// Turns that produce nothing to act on (cut off while thinking, or empty) before the run gives up.
+const MAX_STALLS = 2;
 // A failed model turn is retried this many times (the last retry on the next-best model).
 const STEP_RETRIES = 2;
 
@@ -75,6 +84,12 @@ export function retryable(err: unknown): boolean {
 }
 
 // Keeps what a session teaches about a project: short, durable, and never secret.
+const WEB_SEARCH_PROMPT = [
+  'You search the web for a coding agent. Answer the query from what you find, in at most 300 words of plain facts:',
+  'exact names, versions, values, API signatures and behaviour, with no advice and no filler. Cite the page each fact comes from.',
+  'Say so plainly if the results do not answer the query.',
+].join(' ');
+
 const LEARN_PROMPT = `You keep a short memory of durable facts about a software project for a coding agent that works on it.
 From the session below, pick out what future sessions should know that is not obvious from the code itself:
 - how the user wants things done (their corrections and stated preferences),
@@ -86,7 +101,7 @@ Most sessions teach nothing new; then add nothing. At most 3 entries, each one p
 Answer with JSON only: {"add": ["..."], "remove": ["<id>"]}`;
 const SECRETISH = /(sk-[a-z0-9]|api[_-]?key|token|password|secret|bearer\s)/i;
 
-const READ_ONLY_TOOLS = new Set(['list_files', 'grep', 'read_file', 'wait', 'subagent', 'todo', 'finish']);
+const READ_ONLY_TOOLS = new Set(['list_files', 'grep', 'read_file', 'web_search', 'web_fetch', 'wait', 'subagent', 'todo', 'finish']);
 
 type Finished = { reason: string; summary?: string; verified?: string; next_steps?: string; checks?: 'passed' | 'failed' };
 
@@ -97,43 +112,100 @@ interface StreamedCall {
 }
 
 // Streams one model turn: text deltas go to the UI as they arrive; tool calls and reasoning details are assembled.
-async function readTurn(body: ReadableStream<Uint8Array>, onText: (t: string) => void, onThinking: () => void) {
+// `think`: stop the stream once the model has thought for about `limitTokens` without writing anything or starting
+// a tool call. Models can ignore a thinking budget sent to the provider, so this is enforced here; stopping the
+// stream stops the billing. Thinking tokens are estimated from time (seconds x the model's generation speed): the
+// streamed thinking text is no measure, because providers may stream only a summary of it (Claude Sonnet 5.5 sent
+// ~4.7K characters for ~7K tokens in a minute). A timer checks too, as the stream can go quiet while the model thinks.
+export async function readTurn(
+  body: ReadableStream<Uint8Array>,
+  onText: (t: string) => void,
+  onThinking: () => void,
+  think?: { limitTokens: number; tokensPerSecond: number; stop: () => void },
+) {
   let text = '';
   const calls: StreamedCall[] = [];
   const reasoning: Record<string, unknown>[] = [];
-  let usage: { cost?: number; prompt_tokens?: number; completion_tokens?: number } | undefined;
-  for await (const ev of readSse(body)) {
-    const e = ev as {
-      choices?: { delta?: { content?: string; reasoning?: string; reasoning_details?: Record<string, unknown>[]; tool_calls?: { index?: number; id?: string; function?: { name?: string; arguments?: string } }[] } }[];
-      usage?: typeof usage;
-      error?: { message?: string };
-    };
-    if (e.error) throw new Error(e.error.message ?? 'The model returned an error.');
-    const d = e.choices?.[0]?.delta;
-    if (d?.content) {
-      text += d.content;
-      onText(d.content);
-    }
-    if (d?.reasoning) onThinking();
-    // Reasoning models need their reasoning details passed back with tool results; merge the streamed pieces.
-    for (const r of d?.reasoning_details ?? []) {
-      const i = typeof r.index === 'number' ? r.index : reasoning.length;
-      const slot = (reasoning[i] ??= {});
-      for (const [k, v] of Object.entries(r)) {
-        if (k === 'index') continue;
-        if (typeof v === 'string' && ['text', 'summary', 'data'].includes(k)) slot[k] = ((slot[k] as string | undefined) ?? '') + v;
-        else if (v !== null && v !== undefined && v !== '') slot[k] = v;
+  let thoughtChars = 0;
+  let overthought = false;
+  const started = Date.now();
+  let firstByteAt: number | undefined;
+  let acting = false; // wrote text or started a tool call
+  const thinkingTokens = () => Math.round(((Date.now() - (firstByteAt ?? started)) / 1000) * (think?.tokensPerSecond ?? 0));
+  const overBudget = () => Boolean(think) && !acting && !overthought && thinkingTokens() > think!.limitTokens;
+  const stopThinking = () => {
+    overthought = true;
+    think!.stop();
+  };
+  const timer = think
+    ? setInterval(() => {
+        if (overBudget()) stopThinking();
+      }, 1000)
+    : undefined;
+  let usage: { cost?: number; prompt_tokens?: number; completion_tokens?: number; completion_tokens_details?: { reasoning_tokens?: number } } | undefined;
+  let finishReason: string | undefined;
+  try {
+    for await (const ev of readSse(body)) {
+      firstByteAt ??= Date.now();
+      const e = ev as {
+        choices?: { finish_reason?: string | null; delta?: { content?: string; reasoning?: string; reasoning_details?: Record<string, unknown>[]; tool_calls?: { index?: number; id?: string; function?: { name?: string; arguments?: string } }[] } }[];
+        usage?: typeof usage;
+        error?: { message?: string };
+      };
+      if (e.error) throw new Error(e.error.message ?? 'The model returned an error.');
+      if (e.choices?.[0]?.finish_reason) finishReason = e.choices[0].finish_reason;
+      const d = e.choices?.[0]?.delta;
+      if (d?.content) {
+        text += d.content;
+        onText(d.content);
+      }
+      if (d?.reasoning) {
+        onThinking();
+        thoughtChars += d.reasoning.length;
+      }
+      // Reasoning models need their reasoning details passed back with tool results; merge the streamed pieces.
+      for (const r of d?.reasoning_details ?? []) {
+        const i = typeof r.index === 'number' ? r.index : reasoning.length;
+        const slot = (reasoning[i] ??= {});
+        for (const [k, v] of Object.entries(r)) {
+          if (k === 'index') continue;
+          if (typeof v === 'string' && ['text', 'summary', 'data'].includes(k)) {
+            slot[k] = ((slot[k] as string | undefined) ?? '') + v;
+            if (!d?.reasoning && k !== 'data') thoughtChars += v.length;
+          } else if (v !== null && v !== undefined && v !== '') slot[k] = v;
+        }
+      }
+      for (const tc of d?.tool_calls ?? []) {
+        const slot = (calls[tc.index ?? 0] ??= { id: '', name: '', args: '' });
+        if (tc.id) slot.id = tc.id;
+        if (tc.function?.name && !slot.name) slot.name = tc.function.name;
+        if (tc.function?.arguments) slot.args += tc.function.arguments;
+      }
+      if (e.usage) usage = e.usage;
+      if (text || calls.length) acting = true;
+      if (overBudget()) {
+        stopThinking();
+        break;
       }
     }
-    for (const tc of d?.tool_calls ?? []) {
-      const slot = (calls[tc.index ?? 0] ??= { id: '', name: '', args: '' });
-      if (tc.id) slot.id = tc.id;
-      if (tc.function?.name && !slot.name) slot.name = tc.function.name;
-      if (tc.function?.arguments) slot.args += tc.function.arguments;
-    }
-    if (e.usage) usage = e.usage;
+  } catch (err) {
+    if (!overthought) throw err;
+  } finally {
+    if (timer) clearInterval(timer);
   }
-  return { text, calls: calls.filter(Boolean), reasoning: reasoning.filter(Boolean), usage };
+  // 'length': the answer was cut off at the model's output limit (often while still thinking).
+  return {
+    text,
+    calls: calls.filter(Boolean),
+    reasoning: reasoning.filter(Boolean),
+    usage,
+    truncated: overthought || finishReason === 'length',
+    thoughtChars,
+    // Seconds from the first byte to the end, for learning the model's real generation speed.
+    streamSeconds: (Date.now() - (firstByteAt ?? started)) / 1000,
+    // Stopped by the watchdog: about this many thinking tokens were produced (and billed) before the stop.
+    overthoughtTokens: overthought ? thinkingTokens() : undefined,
+  };
 }
 
 function titleFrom(prompt: string): string {
@@ -145,6 +217,8 @@ export class CodeHarness {
   private readonly listeners = new Map<string, Set<Listener>>();
   private readonly active = new Map<string, ActiveRun>();
   private readonly previews = new Map<string, StaticPreview>();
+  // Output tokens per second, learned per model from completed turns (the thinking watchdog's clock).
+  private readonly tokensPerSecond = new Map<string, number>();
   // Dev servers and watchers; their changes go to the app live (they don't belong in the stored timeline).
   readonly processes = new ProcessManager((sessionId, info) => this.emit(sessionId, 'process', info, false));
 
@@ -161,6 +235,24 @@ export class CodeHarness {
         store.appendCodeEvent(s.id, 'finished', { reason: 'interrupted', summary: 'OneRoute restarted in the middle of this run. Resume to carry on from the last completed step.' });
       }
     }
+    this.writeActiveRuns();
+  }
+
+  private model(id: string) {
+    return this.store.listModels({ includeDisabled: true }).find((m) => m.id === id);
+  }
+
+  // Agent steps use at most the mode's effort cap (see budget.ts).
+  private capped(d: RouteDecision, mode: Mode): RouteDecision {
+    const m = this.model(d.modelId);
+    return capDecision(d, m?.efforts ?? [], mode, m?.pricing.outputPerTok ?? 0, m?.maxOutput);
+  }
+
+  private writeActiveRuns(): void {
+    try {
+      mkdirSync(join(ACTIVE_RUNS_FILE, '..'), { recursive: true });
+      writeFileSync(ACTIVE_RUNS_FILE, JSON.stringify({ pid: process.pid, runs: [...this.active.keys()], updatedAt: new Date().toISOString() }));
+    } catch {}
   }
 
   // --- Projects: only folders the user adds explicitly (git optional) ------------------------------
@@ -245,6 +337,28 @@ export class CodeHarness {
     if (!resolve) return false;
     resolve(allowed);
     return true;
+  }
+
+  // web_search: a cheap routed model with OpenRouter's web plugin answers the query and cites its sources. The
+  // search runs outside the agent's conversation, so the agent's model and prompt cache are untouched.
+  private async webSearch(sessionId: string, query: string, signal: AbortSignal): Promise<ToolOutput> {
+    const messages: ChatMessage[] = [
+      { role: 'system', content: WEB_SEARCH_PROMPT },
+      { role: 'user', content: query },
+    ];
+    const decision = await this.router.route({ messages }, { mode: 'cheap', sessionId: `${sessionId}:search`, sessionExplicit: true, web: 'on' });
+    const result = await this.executor.execute({ messages, stream: false, max_tokens: 1500 }, { ...decision, useWeb: true }, signal);
+    if (!result.response.ok) return `Web search failed: HTTP ${result.response.status} ${(await result.response.text()).slice(0, 200)}`;
+    const json = (await result.response.json()) as {
+      choices?: { message?: { content?: string; annotations?: { type: string; url_citation?: { url: string; title?: string } }[] } }[];
+      usage?: { cost?: number };
+    };
+    const cost = json.usage?.cost ?? 0;
+    this.store.updateCodeSession(sessionId, { addCost: cost });
+    const message = json.choices?.[0]?.message;
+    const sources = [...new Map((message?.annotations ?? []).flatMap((a) => (a.url_citation ? [[a.url_citation.url, a.url_citation.title ?? a.url_citation.url] as const] : []))).entries()];
+    const text = [message?.content?.trim() || '(no answer)', sources.length ? `Sources:\n${sources.map(([url, title]) => `- ${title}: ${url}`).join('\n')}` : ''].filter(Boolean).join('\n\n');
+    return { text, meta: { query, sources: sources.length, costUsd: cost } };
   }
 
   async diff(sessionId: string) {
@@ -384,7 +498,9 @@ export class CodeHarness {
       '',
       'How to work:',
       '- Explore before changing things: list_files, grep, read_file. Read a file before editing it.',
+      '- When the task depends on facts outside the project (how a product or game behaves, a library\'s API, an error message), look them up with web_search and web_fetch instead of guessing from memory.',
       '- Make small, precise edits with edit_file; create new files with write_file. Match the project’s style and conventions.',
+      `- Each of your turns can produce at most about ${Math.round(STEP_MAX_TOKENS_FOR_PROMPT[opts.mode] / 1000)}K tokens, thinking included. Don't plan the whole job in your head: make a short plan, then act, and think again after each result.`,
       '- Keep every tool call reasonably small (a few hundred lines at most). Build a big file in parts: write the skeleton first, then add sections with edit_file. Keep embedded data (word lists, fixtures) modest, or put it in its own file.',
       '- Verify your work: run the project’s tests, type checks or build with bash when they exist, and fix what you break.',
       '- Anything a browser shows (HTML, CSS, front-end JS, web apps): check it with check_page, which opens it in a real headless browser. Look for console errors, and use steps and read to try the interaction you built (type into inputs, click buttons, read the results).',
@@ -414,13 +530,18 @@ export class CodeHarness {
     const session = this.store.getCodeSession(sessionId)!;
     const run: ActiveRun = { controller: new AbortController(), approvals: new Map() };
     this.active.set(sessionId, run);
+    this.writeActiveRuns();
     const signal = run.controller.signal;
     this.store.updateCodeSession(sessionId, { status: 'running' });
     const turn = this.emit(sessionId, 'user', { text: prompt, mode: opts.mode, permission: opts.permission, ...(auto ? { auto: true } : {}) })!;
     const checkpoints = new Checkpoints(sessionId, session.worktree);
     checkpoints.beginTurn(turn);
 
-    const history = (this.store.getCodeMessages(sessionId) as ChatMessage[]).filter((m) => m.role !== 'system');
+    // Assistant turns with no text and no tool calls carried nothing but reasoning (e.g. a turn cut off while thinking);
+    // re-sending them would only cost tokens.
+    const history = (this.store.getCodeMessages(sessionId) as ChatMessage[]).filter(
+      (m) => m.role !== 'system' && !(m.role === 'assistant' && !m.tool_calls && !(typeof m.content === 'string' && m.content.trim())),
+    );
     const tools = opts.permission === 'plan' ? TOOLS.filter((t) => READ_ONLY_TOOLS.has(t.name)) : TOOLS;
     const toolDefs = toolDefinitions(tools);
     const checks = opts.permission === 'plan' ? [] : detectChecks(session.worktree);
@@ -442,20 +563,28 @@ export class CodeHarness {
 
     try {
       // Route once for the run; the model and effort stay fixed so the prompt cache and the thread survive.
+      // A resume is routed on the user's own request, not on OneRoute's "carry on" message.
       decision = await this.router.route(
-        { messages, tools: toolDefs, stream: true },
+        { messages: auto ? messages.slice(0, -1) : messages, tools: toolDefs, stream: true },
         { mode: opts.mode, sessionId, sessionExplicit: true, web: 'off' },
       );
-      const routed = decision;
+      const routed = this.capped(decision, opts.mode);
       ctx.spawn = (role, task) => this.runSubagent(sessionId, run, role, task, opts, routed, ctx);
+      ctx.search = (query) => this.webSearch(sessionId, query, signal);
       this.emit(sessionId, 'route', {
         role: 'implementer',
         modelId: routed.modelId,
         effort: routed.effort,
-        why: explainWhy(routed),
+        why: [
+          ...explainWhy(decision),
+          ...(routed.effort !== decision.effort
+            ? [`Each agent step runs at ${routed.effort} effort at most in ${opts.mode} mode (the task is done in many small steps, so none needs ${decision.effort}).`]
+            : []),
+        ],
         estCostUsd: routed.candidates[0]?.estCostUsd,
       });
-      const contextLength = this.store.listModels({ includeDisabled: true }).find((m) => m.id === routed.modelId)?.contextLength ?? 128_000;
+      const contextLength = this.model(routed.modelId)?.contextLength ?? 128_000;
+      const maxTokens = () => stepMaxTokens(opts.mode, this.model(current.modelId)?.maxOutput);
       const limits = compactionLimits(opts.mode, contextLength);
       let current = routed; // becomes the next-best model if the chosen one keeps failing
       const nextDecision = (): RouteDecision => {
@@ -469,20 +598,80 @@ export class CodeHarness {
       let repeats = 0;
       let changed = false; // edits or commands ran this run, so the checks are worth running
       let retries = 0;
+      let stalls = 0;
+      let failedInARow = 0;
+      let normalEffort: RouteDecision['effort'] | undefined; // the effort to return to after a stall
+      let restoreEffortAt = 0;
       while (!signal.aborted && !finished) {
         steps += 1;
         const stepDecision = steps === 1 ? routed : nextDecision();
 
         const { result, turn: turnResult } = await this.streamStep(
           sessionId,
-          { messages, tools: toolDefs, tool_choice: 'auto', stream: true },
+          { messages, tools: toolDefs, tool_choice: 'auto', stream: true, max_tokens: maxTokens() },
           stepDecision,
           signal,
-          { onText: (t) => this.emit(sessionId, 'text_delta', { text: t }, false), onThinking: () => this.emit(sessionId, 'thinking', {}, false), onSwitch: (d) => (current = d) },
+          {
+            onText: (t) => this.emit(sessionId, 'text_delta', { text: t }, false),
+            onThinking: () => this.emit(sessionId, 'thinking', {}, false),
+            onSwitch: (d) => (current = d),
+            cap: (d) => this.capped(d, opts.mode),
+            thinkLimitTokens: STEP_THINK_TOKENS[opts.mode],
+          },
         );
-        const cost = turnResult.usage?.cost ?? 0;
+        // A turn stopped by the thinking watchdog never gets the provider's usage report: charge an estimate.
+        const estimated = turnResult.usage?.cost === undefined && Boolean(turnResult.overthoughtTokens);
+        const cost = turnResult.usage?.cost ?? (turnResult.overthoughtTokens ?? 0) * (this.model(result.servedModel)?.pricing.outputPerTok ?? 0);
         this.store.updateCodeSession(sessionId, { addCost: cost });
-        this.emit(sessionId, 'step', { step: steps, model: result.servedModel, effort: result.servedEffort, costUsd: cost, promptTokens: turnResult.usage?.prompt_tokens, completionTokens: turnResult.usage?.completion_tokens });
+        this.emit(sessionId, 'step', {
+          step: steps,
+          model: result.servedModel,
+          effort: result.servedEffort,
+          costUsd: cost,
+          promptTokens: turnResult.usage?.prompt_tokens,
+          completionTokens: turnResult.usage?.completion_tokens ?? turnResult.overthoughtTokens,
+          ...(estimated ? { estimated: true } : {}),
+        });
+
+        // A turn that produced nothing to act on: cut off at the output limit or by the thinking watchdog, or empty.
+        // It isn't an answer. The agent is told what happened and to start writing sooner (at one effort level lower
+        // after a cut-off), and the wasted turn and its reasoning are left out of the conversation.
+        if (!turnResult.calls.length && (turnResult.truncated || !turnResult.text.trim())) {
+          stalls += 1;
+          // Break the planning loop: drop to low effort (or the lowest offered) for the next step, so the model acts.
+          const offered = this.model(current.modelId)?.efforts ?? [];
+          const lower = turnResult.truncated ? (offered.includes('low') && current.effort !== 'low' ? 'low' : lowerEffort(current.effort, offered)) : undefined;
+          if (lower) {
+            normalEffort ??= current.effort;
+            current = { ...current, effort: lower };
+            restoreEffortAt = steps + 1;
+          }
+          this.emit(sessionId, 'stalled', {
+            reason: turnResult.overthoughtTokens ? 'thinking' : turnResult.truncated ? 'length' : 'empty',
+            tokens: turnResult.overthoughtTokens ?? turnResult.usage?.completion_tokens,
+            effort: lower,
+          });
+          if (stalls > MAX_STALLS) {
+            finished = {
+              reason: 'error',
+              summary: turnResult.truncated
+                ? `The model kept using its whole output allowance (${turnResult.usage?.completion_tokens ?? 'all'} tokens) on thinking without acting. Try again, or split the task into smaller requests.`
+                : 'The model kept ending its turn without doing anything. Try again, or rephrase the request.',
+            };
+            break;
+          }
+          messages.push({
+            role: 'user',
+            content: turnResult.truncated
+              ? `[OneRoute] Your last turn ${turnResult.overthoughtTokens ? `thought for about ${Math.round(turnResult.overthoughtTokens / 1000)}K tokens without acting and was stopped` : 'ran out of output tokens while you were still thinking'}, before you wrote anything or used a tool, so none of it was kept. Think less up front: make a short plan, then start writing files right away and build the work in several smaller parts (a few hundred lines per tool call).`
+              : '[OneRoute] Your last turn had no text and no tool call. Carry on with the task using the tools, or call finish with a summary if you are done.',
+          });
+          continue;
+        }
+        if (turnResult.truncated && turnResult.calls.length) {
+          // Cut off mid tool call: its arguments are incomplete, and the tool will say so; explain why.
+          this.emit(sessionId, 'stalled', { reason: 'length', tokens: turnResult.usage?.completion_tokens });
+        }
 
         messages.push({
           role: 'assistant',
@@ -506,6 +695,7 @@ export class CodeHarness {
           const output = await this.runTool(sessionId, run, call, opts.permission, tools.map((t) => t.name), ctx, (f) => (finished = f));
           if (output.changed) touched = changed = true;
           if (!output.ok) failures.push(`${call.function.name}: ${output.text.slice(0, 300)}`);
+          failedInARow = output.ok ? 0 : failedInARow + 1;
           messages.push({ role: 'tool', tool_call_id: call.id, content: output.text });
           if (call.function.name === 'finish' && output.ok) finishIndex = messages.length - 1;
           const key = `${call.function.name}:${call.function.arguments}`;
@@ -515,10 +705,20 @@ export class CodeHarness {
             finished = { reason: 'loop', summary: `Stopped: the agent repeated the same ${call.function.name} call ${LOOP_REPEATS} times in a row.` };
             break;
           }
+          if (failedInARow >= MAX_FAILED_IN_A_ROW) {
+            finished = { reason: 'loop', summary: `Stopped: ${MAX_FAILED_IN_A_ROW} tool calls in a row failed, so the agent seems stuck. The last error: ${output.text.slice(0, 300)}` };
+            break;
+          }
         }
         if (touched) {
           const { files } = await this.diff(sessionId);
           this.emit(sessionId, 'diff', { files });
+        }
+        // Acting again after a stall: back to the normal effort as soon as it has taken a step. Staying low for the
+        // rest of the run made the model do the least it could and finish early.
+        if (normalEffort && steps >= restoreEffortAt) {
+          current = { ...current, effort: normalEffort };
+          normalEffort = undefined;
         }
         // Saved after every step, so a run cut off by a restart can resume from here.
         this.store.setCodeMessages(sessionId, messages.slice(1));
@@ -526,7 +726,8 @@ export class CodeHarness {
         // Done, by the agent's account: run the project's checks before the run ends.
         const done = finished as Finished | undefined;
         // The project may have gained tests or pages during the run, so look for checks again.
-        const finalChecks = opts.permission === 'plan' ? [] : detectChecks(session.worktree);
+        const changedFiles = done?.reason === 'finish' && changed ? (await this.diff(sessionId)).files.filter((f) => f.status !== 'deleted').map((f) => f.path) : [];
+        const finalChecks = opts.permission === 'plan' ? [] : detectChecks(session.worktree, changedFiles);
         if (done?.reason === 'finish' && changed && finalChecks.length && !signal.aborted) {
           this.emit(sessionId, 'verifying', { checks: finalChecks.map((c) => c.name) }, false);
           checkResults = await runChecks(session.worktree, finalChecks, signal, ctx.screenshotDir);
@@ -579,6 +780,7 @@ export class CodeHarness {
       }
       this.emit(sessionId, 'finished', finished ?? { reason: 'stopped' });
       this.active.delete(sessionId);
+      this.writeActiveRuns();
       // Learn from the session in the background: corrections from the user and things that failed.
       const done = finished as Finished | undefined;
       const checksFailed = checkResults?.some((r) => !r.ok) ?? false;
@@ -679,6 +881,7 @@ export class CodeHarness {
     } catch {
       decision = await this.router.route(routeReq, prefs);
     }
+    decision = this.capped(decision, opts.mode);
     this.emit(sessionId, 'subagent_start', { id, role, label: spec.label, task, modelId: decision.modelId, effort: decision.effort, why: explainWhy(decision) });
 
     const ctx: ToolContext = { ...parentCtx, reads: new Map(), spawn: undefined };
@@ -698,12 +901,18 @@ export class CodeHarness {
         const last = steps > maxSteps || repeats >= LOOP_REPEATS;
         const { result, turn: t } = await this.streamStep(
           sessionId,
-          { messages, tools: last ? toolDefinitions([REPORT_TOOL]) : toolDefs, tool_choice: last ? { type: 'function', function: { name: 'report' } } : 'auto', stream: true },
+          {
+            messages,
+            tools: last ? toolDefinitions([REPORT_TOOL]) : toolDefs,
+            tool_choice: last ? { type: 'function', function: { name: 'report' } } : 'auto',
+            stream: true,
+            max_tokens: stepMaxTokens(opts.mode, this.model(decision.modelId)?.maxOutput),
+          },
           d,
           signal,
-          { agent: id, onSwitch: (next) => (decision = next) },
+          { agent: id, onSwitch: (next) => (decision = next), cap: (x) => this.capped(x, opts.mode), thinkLimitTokens: STEP_THINK_TOKENS[opts.mode] },
         );
-        const stepCost = t.usage?.cost ?? 0;
+        const stepCost = t.usage?.cost ?? (t.overthoughtTokens ?? 0) * (this.model(result.servedModel)?.pricing.outputPerTok ?? 0);
         cost += stepCost;
         this.store.updateCodeSession(sessionId, { addCost: stepCost });
         this.emit(sessionId, 'step', { agent: id, step: steps, model: result.servedModel, effort: result.servedEffort, costUsd: stepCost, promptTokens: t.usage?.prompt_tokens });
@@ -756,22 +965,51 @@ export class CodeHarness {
     body: Record<string, unknown>,
     decision: RouteDecision,
     signal: AbortSignal,
-    hooks: { onText?: (t: string) => void; onThinking?: () => void; onSwitch?: (d: RouteDecision) => void; agent?: string },
+    hooks: {
+      onText?: (t: string) => void;
+      onThinking?: () => void;
+      onSwitch?: (d: RouteDecision) => void;
+      cap?: (d: RouteDecision) => RouteDecision;
+      agent?: string;
+      thinkLimitTokens?: number;
+    },
   ) {
     let d = decision;
     for (let attempt = 1; ; attempt++) {
       try {
-        const result = await this.executor.execute(body as never, d, signal);
-        if (!result.response.ok || !result.response.body) {
-          const text = await result.response.text();
-          let message = text.slice(0, 400);
-          try {
-            message = (JSON.parse(text) as { error?: { message?: string } }).error?.message ?? message;
-          } catch {}
-          throw Object.assign(new Error(message), { status: result.response.status });
+        // Its own controller, so the thinking watchdog can stop this request without stopping the run. Stop stays
+        // linked until the whole answer has streamed, not just until it starts.
+        const step = new AbortController();
+        const onAbort = () => step.abort();
+        signal.addEventListener('abort', onAbort, { once: true });
+        try {
+          const result = await this.executor.execute(body as never, d, step.signal);
+          if (!result.response.ok || !result.response.body) {
+            const text = await result.response.text();
+            let message = text.slice(0, 400);
+            try {
+              message = (JSON.parse(text) as { error?: { message?: string } }).error?.message ?? message;
+            } catch {}
+            throw Object.assign(new Error(message), { status: result.response.status });
+          }
+          const speed = this.tokensPerSecond.get(result.servedModel) ?? this.model(result.servedModel)?.tps ?? 0;
+          const turn = await readTurn(
+            result.response.body,
+            hooks.onText ?? (() => {}),
+            hooks.onThinking ?? (() => {}),
+            hooks.thinkLimitTokens && speed > 0 ? { limitTokens: hooks.thinkLimitTokens, tokensPerSecond: speed, stop: () => step.abort() } : undefined,
+          );
+          // Learn the model's real speed (providers differ from the catalog figure) for the watchdog's clock.
+          const out = turn.usage?.completion_tokens;
+          if (out && out > 1000 && turn.streamSeconds > 5) {
+            const observed = out / turn.streamSeconds;
+            const prev = this.tokensPerSecond.get(result.servedModel);
+            this.tokensPerSecond.set(result.servedModel, prev ? prev * 0.6 + observed * 0.4 : observed);
+          }
+          return { result, turn };
+        } finally {
+          signal.removeEventListener('abort', onAbort);
         }
-        const turn = await readTurn(result.response.body, hooks.onText ?? (() => {}), hooks.onThinking ?? (() => {}));
-        return { result, turn };
       } catch (err) {
         if (signal.aborted || attempt > STEP_RETRIES || !retryable(err)) throw err;
         const message = (err as Error).message;
@@ -779,7 +1017,7 @@ export class CodeHarness {
         let switchedTo: string | undefined;
         const alt = attempt === STEP_RETRIES ? d.candidates.find((c) => c.modelId !== d.modelId) : undefined;
         if (alt) {
-          d = fresh({ ...d, modelId: alt.modelId, effort: alt.effort });
+          d = fresh((hooks.cap ?? ((x: RouteDecision) => x))({ ...d, modelId: alt.modelId, effort: alt.effort }));
           switchedTo = alt.modelId;
           hooks.onSwitch?.(d);
         } else d = fresh(d);

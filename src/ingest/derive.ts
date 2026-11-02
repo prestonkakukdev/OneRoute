@@ -3,7 +3,7 @@ import { DIMENSION_BENCHMARKS, EFFORTS, FULL_EVIDENCE, INDEX_PRIOR_WEIGHT, type 
 export const ANCHOR = 'artificial_analysis_intelligence_index';
 // Equating needs enough models reporting both numbers; below `RELIABLE_PAIRS` it is trusted less.
 const MIN_PAIRS = 5;
-const RELIABLE_PAIRS = 15;
+export const RELIABLE_PAIRS = 15;
 
 export interface Equating {
   meanB: number;
@@ -11,6 +11,7 @@ export interface Equating {
   meanA: number;
   sdA: number;
   pairs: number;
+  r: number; // correlation with the anchor over those pairs
 }
 
 // Linear equating: puts every benchmark on the Intelligence Index scale by matching the mean and
@@ -28,7 +29,10 @@ export function fitEquating(population: Record<string, number>[], minPairs = MIN
     const sd = (a: number[], m: number) => Math.sqrt(a.reduce((s, x) => s + (x - m) ** 2, 0) / a.length) || 1;
     const meanB = mean(xs);
     const meanA = mean(ys);
-    out.set(b, { meanB, sdB: sd(xs, meanB), meanA, sdA: sd(ys, meanA), pairs: pairs.length });
+    const sdB = sd(xs, meanB);
+    const sdA = sd(ys, meanA);
+    const r = xs.reduce((s, x, i) => s + (x - meanB) * (ys[i]! - meanA), 0) / xs.length / sdB / sdA;
+    out.set(b, { meanB, sdB, meanA, sdA, pairs: pairs.length, r });
   }
   return out;
 }

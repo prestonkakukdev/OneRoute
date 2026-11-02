@@ -43,11 +43,11 @@ const EFFICIENT = 'Work in few steps: read several files or run several checks i
 export const ROLES: Record<SubagentRole, RoleSpec> = {
   explore: {
     label: 'Explorer',
-    tools: ['list_files', 'grep', 'read_file', 'bash', 'process_output', 'wait'],
+    tools: ['list_files', 'grep', 'read_file', 'bash', 'web_search', 'web_fetch', 'process_output', 'wait'],
     maxSteps: { cheap: 8, balanced: 20, best: 30 },
     differentFamily: false,
     instructions: [
-      'You are an explorer helping a coding agent. Investigate the question below in the project and report what you found.',
+      'You are an explorer helping a coding agent. Investigate the question below in the project (and on the web when it is about outside facts) and report what you found.',
       'Read, search and run read-only commands as needed (tests, builds, git log/diff are fine). Do not change any files.',
       'Be specific: name files, functions and line numbers. Put the answer in summary and the supporting facts in findings.',
       EFFICIENT,

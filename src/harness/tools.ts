@@ -27,6 +27,9 @@ export interface ToolContext {
   screenshotDir: string; // where page-check screenshots go
   // Starts a helper agent (main agent only; helpers have no spawn, so they can't start helpers of their own).
   spawn?: (role: SubagentRole, task: string) => Promise<ToolOutput>;
+  // Searches the web (a routed model with OpenRouter's web plugin; billed to the session).
+  search?: (query: string) => Promise<ToolOutput>;
+  fetch?: typeof fetch; // for tests
 }
 
 // A tool's result: text for the model, plus optional details for the app (e.g. a screenshot).
@@ -355,6 +358,64 @@ const checkPageTool = defineTool({
   },
 });
 
+const webSearchTool = defineTool({
+  name: 'web_search',
+  description:
+    'Search the web for current or reference information: documentation, APIs, how a game or product behaves, error messages. Returns a short answer with source links; ' +
+    'open a source with web_fetch for the detail. Each search costs a few cents, so search for what you need, not for things you already know.',
+  schema: z.object({ query: z.string().min(2).describe('What to find, as you would type it into a search engine') }),
+  toolClass: 'read',
+  async run({ query }, ctx) {
+    if (!ctx.search) return 'Web search is not available here.';
+    return ctx.search(query);
+  },
+});
+
+const FETCH_TIMEOUT_MS = 20_000;
+const FETCH_MAX_BYTES = 3_000_000;
+const FETCH_MAX_CHARS = 20_000;
+
+// Readable text from an HTML page: scripts, styles and markup dropped, block elements on their own lines.
+export function htmlToText(html: string): string {
+  const entities: Record<string, string> = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ' };
+  return html
+    .replace(/<(script|style|noscript|svg|template)[^>]*>[\s\S]*?<\/\1>/gi, '')
+    .replace(/<!--[\s\S]*?-->/g, '')
+    .replace(/<(br|\/p|\/div|\/li|\/h[1-6]|\/tr|\/section|\/article|\/pre)[^>]*>/gi, '\n')
+    .replace(/<li[^>]*>/gi, '\n- ')
+    .replace(/<[^>]+>/g, '')
+    .replace(/&(#x?[0-9a-f]+|\w+);/gi, (m, e: string) =>
+      e[0] === '#' ? String.fromCodePoint(e[1]?.toLowerCase() === 'x' ? parseInt(e.slice(2), 16) : Number(e.slice(1))) : (entities[e.toLowerCase()] ?? m),
+    )
+    .replace(/[ \t]+/g, ' ')
+    .replace(/\n\s*\n\s*/g, '\n\n')
+    .trim();
+}
+
+const webFetchTool = defineTool({
+  name: 'web_fetch',
+  description: 'Fetch a web page or file over http(s) and return its text (HTML is converted to plain text; long pages are cut). Use it to read documentation or a source from web_search.',
+  schema: z.object({ url: z.string().url().describe('The full http(s) URL') }),
+  toolClass: 'read',
+  async run({ url }, ctx) {
+    if (!/^https?:\/\//i.test(url)) return 'web_fetch only opens http(s) URLs.';
+    const timeout = AbortSignal.timeout(FETCH_TIMEOUT_MS);
+    let res: Response;
+    try {
+      res = await (ctx.fetch ?? fetch)(url, { signal: AbortSignal.any([ctx.signal, timeout]), redirect: 'follow', headers: { 'User-Agent': 'Mozilla/5.0 (OneRoute Code)', Accept: 'text/html,text/plain,application/json;q=0.9,*/*;q=0.5' } });
+    } catch (err) {
+      return `Could not fetch ${url}: ${timeout.aborted ? 'timed out' : (err as Error).message}`;
+    }
+    const type = res.headers.get('content-type') ?? '';
+    if (!/text|json|xml|javascript/i.test(type) && type) return `${url} returned ${type}, which is not text.`;
+    const body = await res.text();
+    const raw = body.length > FETCH_MAX_BYTES ? body.slice(0, FETCH_MAX_BYTES) : body;
+    const text = /html/i.test(type) || /^\s*<(!doctype|html)/i.test(raw) ? htmlToText(raw) : raw;
+    const title = /<title[^>]*>([^<]*)<\/title>/i.exec(raw)?.[1]?.trim();
+    return `${res.ok ? '' : `HTTP ${res.status}. `}${title ? `${title}\n` : ''}${res.url}\n\n${truncate(text, FETCH_MAX_CHARS)}`;
+  },
+});
+
 const todoTool = defineTool({
   name: 'todo',
   description: 'Set your task list (replaces the previous one). Keep it short; mark items done as you finish them.',
@@ -376,7 +437,7 @@ const finishTool = defineTool({
 });
 
 // The main agent's tools. Helpers get a subset of these plus `report`.
-export const TOOLS: Tool[] = [listTool, grepTool, readTool, editTool, writeTool, bashTool, processOutputTool, stopProcessTool, waitTool, checkPageTool, subagentTool, todoTool, finishTool] as unknown as Tool[];
+export const TOOLS: Tool[] = [listTool, grepTool, readTool, editTool, writeTool, bashTool, processOutputTool, stopProcessTool, waitTool, checkPageTool, webSearchTool, webFetchTool, subagentTool, todoTool, finishTool] as unknown as Tool[];
 export const REPORT_TOOL = reportTool as unknown as Tool;
 export const toolByName = new Map([...TOOLS, REPORT_TOOL].map((t) => [t.name, t]));
 

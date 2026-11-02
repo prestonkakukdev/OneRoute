@@ -39,8 +39,12 @@ export function readJson(path: string): Record<string, unknown> | undefined {
 
 const onPath = (bin: string) => (process.env.PATH ?? '').split(':').concat(['/opt/homebrew/bin', '/usr/local/bin']).some((d) => d && existsSync(join(d, bin)));
 
-// The project's checks, cheapest first.
-export function detectChecks(folder: string): Check[] {
+// Pages the browser check opens at most.
+const MAX_PAGES = 3;
+
+// The project's checks, cheapest first. `changed`: project-relative files the run changed; the browser check opens
+// the HTML pages among them (a run that builds minecraft/index.html is checked there, not at the root page).
+export function detectChecks(folder: string, changed: string[] = []): Check[] {
   const checks: Check[] = [];
   const pkg = readJson(join(folder, 'package.json'));
   const scripts = (pkg?.scripts ?? {}) as Record<string, string>;
@@ -69,7 +73,11 @@ export function detectChecks(folder: string): Check[] {
   }
   // A plain web page (no dev server or bundler): open it the way the user will, straight from disk.
   const bundled = Boolean(scripts.dev || scripts.start || scripts.build);
-  if (!bundled && existsSync(join(folder, 'index.html'))) checks.push({ name: 'Browser', page: 'index.html' });
+  if (!bundled) {
+    const pages = changed.filter((f) => /\.html?$/i.test(f) && !/(^|\/)(node_modules|dist|build|vendor)\//.test(f) && existsSync(join(folder, f)));
+    if (!pages.length && existsSync(join(folder, 'index.html'))) pages.push('index.html');
+    for (const page of pages.slice(0, MAX_PAGES)) checks.push({ name: 'Browser', page });
+  }
   return checks;
 }
 

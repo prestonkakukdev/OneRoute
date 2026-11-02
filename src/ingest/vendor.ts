@@ -17,6 +17,8 @@ interface VendorReport {
   source: string;
   url: string;
   reporter: string;
+  // Measured by a third party (e.g. Artificial Analysis metrics its free API doesn't include), not the model's maker.
+  independent?: boolean;
   published: string;
   models?: string[];
   defaultEffort?: 'top' | 'default';
@@ -25,13 +27,15 @@ interface VendorReport {
   points?: { model: string; effort: Effort; benchmark: string; value: number }[];
 }
 
-// Vendor-published results transcribed into data/vendor-benchmarks.json. Every row keeps its report as
-// the source, so the same model x benchmark reported by two vendors stays as two rows.
+// Results transcribed into data/vendor-benchmarks.json: vendor release pages, plus third-party measurements marked
+// `independent`. Every row keeps its report as the source, so the same model x benchmark reported twice stays as
+// two rows.
 export function loadVendorResults(file = new URL('../../data/vendor-benchmarks.json', import.meta.url)): ExternalResult[] {
   const { reports } = JSON.parse(readFileSync(file, 'utf8')) as { reports: VendorReport[] };
   const out: ExternalResult[] = [];
   for (const r of reports) {
-    const base = { source: `vendor:${r.source}`, sourceRef: r.url, independent: false, measuredAt: r.published };
+    const independent = r.independent ?? false;
+    const base = { source: independent ? r.source : `vendor:${r.source}`, sourceRef: r.url, independent, measuredAt: r.published };
     for (const [benchmark, values] of Object.entries(r.rows ?? {})) {
       values.forEach((value, i) => {
         const orId = r.models?.[i];

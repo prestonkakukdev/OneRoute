@@ -4,6 +4,7 @@ import { CAPABILITY_KEYS, EFFORTS, INDEX_TO_SKILL, SOURCE_QUALITY, type Capabili
 import type { SkillValue, VariantMetrics } from '../types.js';
 import { AA_SOURCE, cleanEvals, matchVariants, metricsOf, parseVariant, type AaModel } from './aa.js';
 import { ANCHOR, deriveDimensions, fitEffortEffects, fitEquating, type DerivedValue } from './derive.js';
+import { onLegacyScale, type LegacyIndex } from './anchor.js';
 import { ModelResolver } from './resolve.js';
 import type { ExternalResult } from './vendor.js';
 
@@ -17,6 +18,9 @@ export interface PipelineInput {
   fetchedAt: string;
   minRelease?: string;
   overrides?: Record<string, string>;
+  // Last published v4 index per AA variant. When given, the API's index field is read as v5 and every variant is
+  // put on the v4 scale (see anchor.ts); without it the field is the anchor as-is.
+  legacyIndex?: LegacyIndex;
 }
 
 export interface PipelineReport {
@@ -27,6 +31,7 @@ export interface PipelineReport {
   externalRows: number;
   externalUnmatched: number;
   unmatchedAa: { slug: string; name: string; release?: string | null }[];
+  estimatedIndex: number; // variants whose v4 index was estimated from v5 and their benchmarks
   disabled: string[];
   benchmarksEquated: number;
   effortEffects: Partial<Record<Capability, Partial<Record<Effort, number>>>>;
@@ -50,8 +55,9 @@ interface RawRow {
 // -> each benchmark equated onto one scale -> capability values per model x effort -> skills.
 export function runPipeline(store: Store, input: PipelineInput): PipelineReport {
   const resolver = new ModelResolver(input.or, input.overrides);
+  const { aa: allAa, estimated } = input.legacyIndex ? onLegacyScale(input.aa, input.legacyIndex) : { aa: input.aa, estimated: new Set<string>() };
   // Only variants with an Intelligence Index can be placed on the common scale.
-  const recentAa = input.aa.filter(
+  const recentAa = allAa.filter(
     (v) => cleanEvals(v)[ANCHOR] !== undefined && (!input.minRelease || (v.release_date ?? '') >= input.minRelease),
   );
   const { matches, unmatched } = matchVariants(recentAa, resolver);
@@ -68,7 +74,7 @@ export function runPipeline(store: Store, input: PipelineInput): PipelineReport 
         effort: m.effort,
         benchmark,
         value,
-        source: AA_SOURCE,
+        source: benchmark === ANCHOR && estimated.has(m.aa.id) ? `${AA_SOURCE}:estimated` : AA_SOURCE,
         sourceRef: `https://artificialanalysis.ai/models/${parseVariant(m.aa).base}`,
         independent: true,
         measuredAt: input.fetchedAt,
@@ -116,7 +122,7 @@ export function runPipeline(store: Store, input: PipelineInput): PipelineReport 
 
   // 3. Common scale: AA benchmarks are equated over the whole AA population (hundreds of variants);
   //    other sources over the tracked variants that also have an Intelligence Index.
-  const eq = fitEquating(input.aa.map(cleanEvals).filter((v) => v[ANCHOR] !== undefined));
+  const eq = fitEquating(allAa.filter((v) => !estimated.has(v.id)).map(cleanEvals).filter((v) => v[ANCHOR] !== undefined));
   const aaBenchmarks = new Set(eq.keys());
   const externalEq = fitEquating(
     [...grouped.values()].map((g) =>
@@ -126,9 +132,9 @@ export function runPipeline(store: Store, input: PipelineInput): PipelineReport 
   for (const [b, e] of externalEq) if (!aaBenchmarks.has(b)) eq.set(b, e);
 
   // 4. Measured effect of each effort level per capability, from AA families measured at 2+ efforts.
-  const derivedAa = new Map(input.aa.map((v) => [v.id, deriveDimensions(cleanEvals(v), eq)]));
+  const derivedAa = new Map(allAa.map((v) => [v.id, deriveDimensions(cleanEvals(v), eq)]));
   const families = new Map<string, AaModel[]>();
-  for (const v of input.aa) {
+  for (const v of allAa) {
     const { base, effort } = parseVariant(v);
     if (effort) families.set(base, [...(families.get(base) ?? []), v]);
   }
@@ -277,6 +283,7 @@ export function runPipeline(store: Store, input: PipelineInput): PipelineReport 
     externalRows: input.external.length - externalUnmatched,
     externalUnmatched,
     unmatchedAa: unmatched.map((u) => ({ slug: u.slug, name: u.name, release: u.release_date })),
+    estimatedIndex: [...estimated].filter((id) => matches.some((m) => m.aa.id === id)).length,
     disabled,
     benchmarksEquated: eq.size,
     effortEffects,
