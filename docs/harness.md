@@ -117,7 +117,7 @@ or extend it later.
 - Read tracking: edits require a prior read of that file and fail if it changed since (hash).
 - Tool output truncation: keep head and tail, say what was cut.
 - Compaction (`src/harness/compact.ts`): the budget is the smaller of 75 % of the model's context and a per-mode
-  cap (Cheap 48K, Balanced 128K, Best 256K prompt tokens). Past 60 % of it, output of all but the last six tool
+  cap (Cheap and Balanced 128K, Best 256K prompt tokens). Past 60 % of it, output of all but the last six tool
   results is cleared; past 100 %, the older conversation is summarised by the run's model and the recent turns stay
   verbatim.
 - Prompt caching: the router's session stickiness and cache planning apply per sub-task.
@@ -143,7 +143,7 @@ model and effort that produced them.
 When the agent calls `finish` after changing things, OneRoute runs the project's checks itself (`src/harness/verify.ts`):
 type check, lint and tests from package.json scripts (npm/pnpm/yarn/bun), `node --test` for `*.test.js`, pytest,
 cargo, go, `make test`, and — for a plain web page with no dev server — a headless-browser load from disk of the
-HTML pages the run changed (up to three; `index.html` when none changed). Failures go back to the agent as the result of its `finish` call ("Not finished: …") up to 1/2/3 times
+HTML pages the run changed (up to three; `index.html` when none changed). Failures go back to the agent as the result of its `finish` call ("Not finished: …") up to 2/2/3 times
 (Cheap/Balanced/Best); after that the run ends with the failures stated. The result is recorded as implicit
 feedback on the run's routing decision, so passing or failing checks feed the router's per-model success rates.
 
@@ -168,7 +168,7 @@ the Run tab, and are stopped when the session is removed or the server shuts dow
 The main agent can hand a self-contained job to a helper with the `subagent` tool (`src/harness/subagents.ts`):
 **explore** (find things, make sense of long logs; read-only tools plus bash) or **review** (check the work so far,
 including the session's diff; adds `check_page`). A helper runs in a fresh context, is routed on its own task (a
-reviewer is kept off the main agent's model family when another family fits), has a step budget (8/20/30 for
+reviewer is kept off the main agent's model family when another family fits), has a step budget (20/20/30 for
 Cheap/Balanced/Best, the last turn forced to report), and returns only a Zod-validated `report` (summary,
 findings with file/line/severity, files, pass/fail). Its reads and command output never enter the main
 conversation. Helpers can't start helpers (one level deep). In the app each helper is a card with its model, cost,

@@ -1,4 +1,4 @@
-// Context compaction. Long sessions outgrow the model's context (and, in Cheap mode, the budget). Two steps, cheapest
+// Context compaction. Long sessions outgrow the model's context (or the mode's budget). Two steps, cheapest
 // first: old tool output is cleared (the agent can re-run a tool if it needs it again), then, if that isn't enough,
 // the older part of the conversation is replaced by a summary written by the same model. The system prompt and the
 // most recent turns always stay verbatim.
@@ -7,7 +7,7 @@ import type { Mode } from '../taxonomy.js';
 import type { ChatMessage } from '../types.js';
 
 // Prompt-token budgets per mode, before the model's own context limit.
-const BUDGET: Record<Mode, number> = { cheap: 48_000, balanced: 128_000, best: 256_000 };
+const BUDGET: Record<Mode, number> = { cheap: 128_000, balanced: 128_000, best: 256_000 };
 
 export function compactionLimits(mode: Mode, contextLength: number): { prune: number; summarize: number } {
   const limit = Math.min(BUDGET[mode] ?? BUDGET.balanced, Math.floor((contextLength || 128_000) * 0.75));
