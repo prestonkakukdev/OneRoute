@@ -434,7 +434,7 @@ const unescape = (s?: string) => (s ?? '').replace(/\\n/g, '\n').replace(/\\t/g,
 const FINISH_LABEL: Record<string, string> = {
   finish: 'Done',
   answered: 'Answered',
-  paused: 'Paused after an increment',
+  paused: 'Paused',
   stopped: 'Stopped',
   loop: 'Stopped: stuck in a loop',
   error: 'Stopped by an error',

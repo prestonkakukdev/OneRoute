@@ -131,8 +131,8 @@ composer changes folders, and the sidebar lists each project with its sessions u
 like chats).
 
 **How it works**
-- **Modes:** Cheap works in small increments and pauses after each one, so you steer and spend little; Balanced and
-  Best keep going until the task is done and verified.
+- **Modes:** every mode keeps going until the task is done and verified; the mode sets how the router trades
+  quality against cost when it picks the model and effort (Cheap: the cheapest likely to succeed).
 - **Permissions** (the + menu): **Auto-edit** (default) edits files and runs ordinary commands freely, but
   dangerous commands (pushing, deleting outside the folder, `sudo`, reading secrets, …) wait for your approval;
   **Ask** approves everything; **Plan** only reads and proposes a plan. When approval is needed and the app isn't in

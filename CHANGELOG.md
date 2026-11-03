@@ -19,6 +19,9 @@
     that only thinks is stopped and retried at low effort instead of being shown as "answered". Stop works
     mid-stream, and the service no longer restarts while a run is active.
   - Verification opens the pages a run changed, not just the project's root `index.html`.
+  - Cheap mode builds the whole task like Balanced and Best (no more small increments or pause after 25 steps); it
+    differs only in the models and effort the router picks. Its check retries, helper steps and context budget now
+    match Balanced.
 - Models: GPT-6.1 Sol and Terra, Claude Haiku 5.5, Gemini 4 Argon, Kimi K3.1 Pro, Muse Wonder, DeepSeek V4.1 Flash
   1017, DeepSeek V4 Pro 0813, Mistral Large 4, Step 5 Preview, Beam 1.0 and others (122 enabled models). Vendor
   results from the GPT-6.1 Terra and Sol pages (every effort level), the Claude Haiku 5.5 and Sonnet 5.5 pages, and

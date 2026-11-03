@@ -44,7 +44,7 @@ export const ROLES: Record<SubagentRole, RoleSpec> = {
   explore: {
     label: 'Explorer',
     tools: ['list_files', 'grep', 'read_file', 'bash', 'web_search', 'web_fetch', 'process_output', 'wait'],
-    maxSteps: { cheap: 8, balanced: 20, best: 30 },
+    maxSteps: { cheap: 20, balanced: 20, best: 30 },
     differentFamily: false,
     instructions: [
       'You are an explorer helping a coding agent. Investigate the question below in the project (and on the web when it is about outside facts) and report what you found.',
@@ -56,7 +56,7 @@ export const ROLES: Record<SubagentRole, RoleSpec> = {
   review: {
     label: 'Reviewer',
     tools: ['list_files', 'grep', 'read_file', 'bash', 'check_page', 'process_output', 'wait'],
-    maxSteps: { cheap: 8, balanced: 20, best: 30 },
+    maxSteps: { cheap: 20, balanced: 20, best: 30 },
     differentFamily: true,
     instructions: [
       'You are a reviewer checking another coding agent’s work. Find real problems before the user does.',

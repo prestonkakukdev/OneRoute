@@ -41,7 +41,7 @@ import { CodeSidebar } from './sidebar';
 import { buildTimeline, Timeline } from './timeline';
 
 const MODES: AiModel[] = [
-  { id: 'cheap', label: 'Cheap', description: 'Works in small increments and pauses after each, so you steer and spend little.' },
+  { id: 'cheap', label: 'Cheap', description: 'Keeps going until the task is done and verified, with the cheapest models likely to get it right.' },
   { id: 'balanced', label: 'Balanced', description: 'Keeps going until the task is done and verified, trading quality against cost.' },
   { id: 'best', label: 'Best', description: 'Keeps going until done, with the strongest models and more reasoning.' },
 ];
@@ -609,7 +609,7 @@ export function CodeWorkspace({
             )}
           />
           <div className="text-muted-foreground/70 mt-1.5 text-center text-[11px]">
-            {mode === 'cheap' ? 'Cheap: works in small increments and pauses after each' : 'Keeps going until the task is done'} · dangerous commands always ask
+            Keeps going until the task is done · dangerous commands always ask
           </div>
         </div>
       </section>

@@ -58,14 +58,11 @@ interface ActiveRun {
   approvals: Map<string, (allowed: boolean) => void>;
 }
 
-// Cheap mode works in increments: after this many steps the run pauses and reports, and the user decides whether
-// to continue. Balanced and Best have no step limit (a stuck loop still stops them).
-const CHEAP_STEP_PAUSE = 25;
 // The same tool call repeated this many times in a row is a stuck loop.
 const LOOP_REPEATS = 3;
 
 // Automatic checks that fail send the agent back to fix them this many times before the run ends anyway.
-const CHECK_RETRIES: Record<Mode, number> = { cheap: 1, balanced: 2, best: 3 };
+const CHECK_RETRIES: Record<Mode, number> = { cheap: 2, balanced: 2, best: 3 };
 
 // Tool calls failing back to back this many times means the agent is stuck (different calls, same wall).
 const MAX_FAILED_IN_A_ROW = 8;
@@ -482,10 +479,7 @@ export class CodeHarness {
     const agentsFile = ['AGENTS.md', 'CLAUDE.md', '.cursorrules'].map((f) => join(session.worktree, f)).find((f) => existsSync(f));
     const instructions = agentsFile ? truncate(readFileSync(agentsFile, 'utf8'), 8000) : '';
     const memory = this.store.listCodeMemory(session.projectId).slice(-40);
-    const pace =
-      opts.mode === 'cheap'
-        ? 'Cheap mode: work in one small increment. Make the smallest useful, working change toward the goal, verify it, then call finish and describe the next increment. Do not start a second increment.'
-        : 'Keep going until the task is complete and verified, then call finish.';
+    const pace = 'Keep going until the task is complete and verified, then call finish.';
     const plan =
       opts.permission === 'plan'
         ? 'Plan mode: you can only read. Investigate, then call finish with a concrete plan: the files to change, the steps, and how to verify.'
@@ -747,10 +741,6 @@ export class CodeHarness {
           }
           done.checks = failed.length ? 'failed' : 'passed';
           if (failed.length) done.summary = `${done.summary ?? ''}\n\n**Checks still failing:** ${failed.map((r) => r.name).join(', ')}.`.trim();
-        }
-
-        if (!finished && opts.mode === 'cheap' && steps >= CHEAP_STEP_PAUSE) {
-          finished = { reason: 'paused', summary: `Paused after ${steps} steps (Cheap mode works in increments). Send a message to continue.` };
         }
 
         // Keep the conversation inside the budget: clear old tool output, and summarise if that isn't enough.
